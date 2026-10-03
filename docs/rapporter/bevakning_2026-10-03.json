@@ -1,0 +1,142 @@
+[
+ {
+  "ticker": "NVDA",
+  "namn": "NVIDIA Corporation",
+  "kurs": 233.9499969482422,
+  "poäng": 84,
+  "betyg": "Köpvärd",
+  "säkerhet": null,
+  "sammanfattning": null,
+  "förändring_1m": 0.04367796703392446
+ },
+ {
+  "ticker": "AVGO",
+  "namn": "Broadcom Inc.",
+  "kurs": 355.1400146484375,
+  "poäng": 76,
+  "betyg": "Köpvärd",
+  "säkerhet": null,
+  "sammanfattning": null,
+  "förändring_1m": -0.031187460179937343
+ },
+ {
+  "ticker": "AMZN",
+  "namn": "Amazon.com, Inc.",
+  "kurs": 251.52000427246094,
+  "poäng": 69,
+  "betyg": "Köpvärd",
+  "säkerhet": null,
+  "sammanfattning": null,
+  "förändring_1m": -0.013569658455776734
+ },
+ {
+  "ticker": "GOOG",
+  "namn": "Alphabet Inc.",
+  "kurs": 340.3500061035156,
+  "poäng": 79,
+  "betyg": "Köpvärd",
+  "säkerhet": null,
+  "sammanfattning": null,
+  "förändring_1m": 0.020345634808197177
+ },
+ {
+  "ticker": "CRSP",
+  "namn": "CRISPR Therapeutics AG",
+  "kurs": 55.43000030517578,
+  "poäng": 48,
+  "betyg": "Avvakta / bevaka",
+  "säkerhet": null,
+  "sammanfattning": null,
+  "förändring_1m": -0.02617705396523451
+ },
+ {
+  "ticker": "RXRX",
+  "namn": "Recursion Pharmaceuticals, Inc.",
+  "kurs": 4.119999885559082,
+  "poäng": 45,
+  "betyg": "Avvakta / bevaka",
+  "säkerhet": null,
+  "sammanfattning": null,
+  "förändring_1m": 0.21893483611333142
+ },
+ {
+  "ticker": "BE",
+  "namn": "Bloom Energy Corporation",
+  "kurs": 289.1499938964844,
+  "poäng": 58,
+  "betyg": "Avvakta / bevaka",
+  "säkerhet": null,
+  "sammanfattning": null,
+  "förändring_1m": 0.3307713343195926
+ },
+ {
+  "ticker": "SMR",
+  "namn": "NuScale Power Corporation",
+  "kurs": 7.75,
+  "poäng": 42,
+  "betyg": "Undvik just nu",
+  "säkerhet": null,
+  "sammanfattning": null,
+  "förändring_1m": -0.18933057951573495
+ },
+ {
+  "ticker": "UUUU",
+  "namn": "Energy Fuels Inc.",
+  "kurs": 10.729999542236328,
+  "poäng": 58,
+  "betyg": "Avvakta / bevaka",
+  "säkerhet": null,
+  "sammanfattning": null,
+  "förändring_1m": -0.24912529245067006
+ },
+ {
+  "ticker": "MP",
+  "namn": "MP Materials Corp.",
+  "kurs": 46.970001220703125,
+  "poäng": 39,
+  "betyg": "Undvik just nu",
+  "säkerhet": null,
+  "sammanfattning": null,
+  "förändring_1m": -0.14131626022706723
+ },
+ {
+  "ticker": "SYM",
+  "namn": "Symbotic Inc.",
+  "kurs": 43.279998779296875,
+  "poäng": 53,
+  "betyg": "Avvakta / bevaka",
+  "säkerhet": null,
+  "sammanfattning": null,
+  "förändring_1m": 0.08552796435329402
+ },
+ {
+  "ticker": "NBIS",
+  "namn": "Nebius Group N.V.",
+  "kurs": 242.80999755859375,
+  "poäng": 59,
+  "betyg": "Avvakta / bevaka",
+  "säkerhet": null,
+  "sammanfattning": null,
+  "förändring_1m": 0.18972023085638368
+ },
+ {
+  "ticker": "LUNR",
+  "namn": "Intuitive Machines, Inc.",
+  "kurs": 14.710000038146973,
+  "poäng": 54,
+  "betyg": "Avvakta / bevaka",
+  "säkerhet": null,
+  "sammanfattning": null,
+  "förändring_1m": -0.010094187213717243
+ },
+ {
+  "ticker": "SPCX",
+  "namn": "Space Exploration Technologies Corp.",
+  "kurs": 158.9600067138672,
+  "poäng": 61,
+  "betyg": "Avvakta / bevaka",
+  "säkerhet": null,
+  "sammanfattning": null,
+  "förändring_1m": 0.12969937551855315
+ }
+]
