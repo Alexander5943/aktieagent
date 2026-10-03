@@ -383,6 +383,8 @@ def evaluate(top: int, demo: bool):
         period, start = fn[8:-4].rsplit("_", 1)
         old = pd.read_csv(os.path.join(HIST, fn)).head(top)
         days = (date.today() - date.fromisoformat(start)).days
+        if days < 30:  # för tidigt att säga något
+            continue
         print(f"\n=== Lista {period} (skapad {start}, {days} dagar sedan) - topp {len(old)} ===")
         if demo:
             print("  (demo: ingen riktig kursdata)")
