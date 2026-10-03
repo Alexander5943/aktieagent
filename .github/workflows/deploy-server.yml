@@ -41,6 +41,17 @@ jobs:
           [ -z "$APP_KEY" ] && missing="$missing APP_KEY"
           if [ -n "$missing" ]; then echo "::error::Dessa hemligheter saknas i GitHub:$missing"; exit 1; fi
 
+      - name: Rensa konto-ID
+        run: |
+          # Plocka ut det 32 tecken långa ID:t, även om mellanslag eller en hel adress följt med
+          id=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | tr 'A-F' 'a-f' | grep -oE '[a-f0-9]{32}' | head -1)
+          if [ -z "$id" ]; then
+            echo "::error::CLOUDFLARE_ACCOUNT_ID ser fel ut. Det ska vara 32 tecken (0-9 och a-f), t.ex. från adressen dash.cloudflare.com/<ID>."
+            exit 1
+          fi
+          echo "::add-mask::$id"
+          echo "CLOUDFLARE_ACCOUNT_ID=$id" >> "$GITHUB_ENV"
+
       - name: Installera
         run: npm ci
 
