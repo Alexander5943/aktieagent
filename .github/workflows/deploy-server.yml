@@ -49,7 +49,15 @@ jobs:
 
       - name: Ladda upp till Cloudflare
         run: |
-          npx wrangler deploy 2>&1 | tee deploy.log
+          set -o pipefail
+          if ! npx wrangler deploy 2>&1 | tee deploy.log; then
+            if grep -qi "subdomain" deploy.log; then
+              echo "::error::Välj först en workers.dev-adress i Cloudflare: Compute → Workers & Pages."
+            else
+              echo "::error::Cloudflare avvisade uppladdningen. Se loggen ovan."
+            fi
+            exit 1
+          fi
           url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)
           if [ -z "$url" ]; then echo "::error::Hittade ingen serveradress i svaret från Cloudflare."; exit 1; fi
           echo "URL=$url" >> "$GITHUB_ENV"
