@@ -1,0 +1,10 @@
+{
+  // Cloudflare Worker för Aktieagent. Databasen (KV) skapas automatiskt vid första deploy.
+  "name": "aktieagent",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  "kv_namespaces": [{ "binding": "AKTIE_KV" }],
+  // Varje måndag 05:00 UTC uppdateras AI-analysen för bevakningslistan
+  "triggers": { "crons": ["0 5 * * 1"] },
+  "vars": { "AI_DAILY_LIMIT": "25" }
+}

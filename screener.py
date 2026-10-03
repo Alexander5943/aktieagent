@@ -479,6 +479,8 @@ def main():
 
     with open(a.out, "w", encoding="utf-8") as fh:
         fh.write(html(df, ai, a, len(tickers), f"{year}–{year + 1}"))
+    with open(a.out.replace(".html", "_ai.json"), "w", encoding="utf-8") as fh:
+        json.dump(ai, fh, ensure_ascii=False)
     print(f"\nRapport: {os.path.abspath(a.out)}")
     print(f"Alla rader (CSV): {os.path.abspath(a.out.replace('.html', '.csv'))}")
 
