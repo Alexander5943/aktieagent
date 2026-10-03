@@ -449,8 +449,8 @@ def main():
     tickers = universe(a.universe, a.demo, a.tickers_file)
     df = screen(tickers, a.demo, a.min_mcap, a.min_volume, a.max_price, a.min_price, a.workers)
     if df.empty:
-        print("Inga aktier klarade filtren.")
-        return
+        print("FEL: Inga aktier klarade filtren. Om 0 kurser hämtades svarar troligen inte Yahoo Finance just nu.")
+        return 1
     df = rank(df, a.sort, a.min_quality)
     df.to_csv(a.out.replace(".html", ".csv"), index=False)
     if not a.demo:

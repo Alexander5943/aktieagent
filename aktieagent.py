@@ -487,6 +487,9 @@ def main():
             results.append(analyze(tk, a.demo, not a.no_ai))
         except Exception as e:
             print(f"  Fel för {tk}: {e}")
+    if not results:
+        print("\nFEL: Ingen aktie kunde analyseras. Troligen svarar inte Yahoo Finance just nu.")
+        return 1
     if results:
         with open(a.out, "w", encoding="utf-8") as fh:
             fh.write(html_report(results))

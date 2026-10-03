@@ -25,9 +25,9 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       PYTHONIOENCODING: utf-8
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -52,7 +52,8 @@ jobs:
         run: |
           git config user.name "aktieagent"
           git config user.email "aktieagent@users.noreply.github.com"
-          git add docs historik
+          git add docs
+          if [ -d historik ]; then git add historik; fi
           git diff --cached --quiet || git commit -m "Ny analys $(date +%Y-%m-%d)"
           git pull --rebase origin main
           git push
