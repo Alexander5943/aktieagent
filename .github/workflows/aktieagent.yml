@@ -1,0 +1,57 @@
+name: Aktieagent
+
+on:
+  schedule:
+    - cron: "0 5 * * 1"    # Bevakningslistan: varje måndag (07:00 svensk sommartid, 06:00 vintertid)
+    - cron: "30 5 1 * *"   # Screenern: den 1:a varje månad
+  workflow_dispatch:       # Gör att du kan starta manuellt från GitHub (även i mobilen)
+    inputs:
+      vad:
+        description: "Vad ska köras?"
+        type: choice
+        options: [bevakningslista, screener, båda]
+        default: bevakningslista
+
+permissions:
+  contents: write          # behövs för att spara rapporterna i repot
+
+concurrency: aktieagent    # två körningar krockar aldrig
+
+jobs:
+  kor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installera paket
+        run: pip install -r requirements.txt
+
+      - name: Bevakningslista
+        if: github.event.schedule == '0 5 * * 1' || inputs.vad == 'bevakningslista' || inputs.vad == 'båda'
+        run: python aktieagent.py --file bevakningslista.txt --out-dir docs/rapporter
+
+      - name: Screener (S&P 500, AI på topp 10)
+        if: github.event.schedule == '30 5 1 * *' || inputs.vad == 'screener' || inputs.vad == 'båda'
+        run: |
+          python screener.py --ai-top 10 --out-dir docs/rapporter
+          python screener.py --utvardera > docs/utvardering.txt || true
+
+      - name: Bygg appen
+        run: python bygg_sajt.py
+
+      - name: Spara rapporterna
+        run: |
+          git config user.name "aktieagent"
+          git config user.email "aktieagent@users.noreply.github.com"
+          git add docs historik
+          git diff --cached --quiet || git commit -m "Ny analys $(date +%Y-%m-%d)"
+          git push
