@@ -280,17 +280,17 @@ TOOLS = [
          "type": "object",
          "properties": {
              "betyg": {"type": "string", "enum": ["Köpvärd", "Avvakta / bevaka", "Undvik just nu"]},
-             "säkerhet": {"type": "string", "enum": ["Låg", "Medel", "Hög"],
+             "sakerhet": {"type": "string", "enum": ["Låg", "Medel", "Hög"],
                           "description": "Hur säker bedömningen är, givet datan."},
              "sammanfattning": {"type": "string", "description": "2-4 korta meningar."},
              "styrkor": {"type": "array", "items": {"type": "string"}},
              "risker": {"type": "array", "items": {"type": "string"}},
-             "värdering_kommentar": {"type": "string", "description": "Är aktien dyr eller billig i förhållande till tillväxten? Varför?"},
+             "vardering_kommentar": {"type": "string", "description": "Är aktien dyr eller billig i förhållande till tillväxten? Varför?"},
              "att_bevaka": {"type": "array", "items": {"type": "string"},
                             "description": "Vad som skulle ändra bedömningen."},
          },
-         "required": ["betyg", "säkerhet", "sammanfattning", "styrkor", "risker",
-                      "värdering_kommentar", "att_bevaka"],
+         "required": ["betyg", "sakerhet", "sammanfattning", "styrkor", "risker",
+                      "vardering_kommentar", "att_bevaka"],
      }},
 ]
 
@@ -322,7 +322,14 @@ def run_ai_agent(d: StockData, f: dict, t: dict, s: dict, verbose=True) -> dict 
             if verbose:
                 print(f"  -> agenten anropar {block.name}")
             if block.name == "submit_verdict":
-                return block.input
+                # API:t tillåter bara a-z i fältnamn, så å/ä/ö läggs tillbaka här
+                v = dict(block.input)
+                return {"betyg": v.get("betyg", s["bedömning"]),
+                        "säkerhet": v.get("sakerhet", "Låg"),
+                        "sammanfattning": v.get("sammanfattning", ""),
+                        "styrkor": v.get("styrkor", []), "risker": v.get("risker", []),
+                        "värdering_kommentar": v.get("vardering_kommentar", ""),
+                        "att_bevaka": v.get("att_bevaka", [])}
             data = handlers[block.name]()
             results.append({"type": "tool_result", "tool_use_id": block.id,
                             "content": json.dumps(data, ensure_ascii=False, default=str)})
