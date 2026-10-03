@@ -33,6 +33,7 @@ import numpy as np
 import pandas as pd
 
 MODEL = os.environ.get("AKTIEAGENT_MODEL", "claude-opus-5-5")
+AI_DISABLED = False
 
 
 # ---------------------------------------------------------------------------
@@ -443,7 +444,19 @@ def analyze(ticker: str, demo: bool, use_ai: bool) -> dict:
     print(f"  Regelpoäng: {s['total']}/100 -> {s['bedömning']}")
     for k, v in s["områden"].items():
         print(f"    {k:<18} {'–' if v is None else v}")
-    ai = run_ai_agent(d, f, t, s) if use_ai else None
+    ai = None
+    global AI_DISABLED
+    if use_ai and not AI_DISABLED:
+        try:
+            ai = run_ai_agent(d, f, t, s)
+        except Exception as e:
+            # T.ex. slut på krediter eller fel nyckel: fortsätt med bara regelpoängen
+            msg = str(e)
+            if "credit" in msg.lower() or "balance" in msg.lower():
+                print("  AI-delen stoppad: krediterna är slut. Fyll på i console.anthropic.com.")
+            else:
+                print(f"  AI-delen misslyckades ({type(e).__name__}): {msg[:200]}")
+            AI_DISABLED = True  # försök inte igen för resten av aktierna i denna körning
     if ai:
         print(f"  AI-bedömning: {ai['betyg']} (säkerhet: {ai['säkerhet']})")
         print(f"  {ai['sammanfattning']}")
