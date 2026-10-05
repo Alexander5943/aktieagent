@@ -41,19 +41,34 @@ def ranking():
         with open(ai_file, encoding="utf-8") as fh:
             ai = json.load(fh)
     period = csv.split("_")[1]
+    badge = lambda t: (ai.get(t) or {}).get("betyg")
+
+    listor = {}
+    if "årlig_3år" in df.columns:  # nya kolumner finns (screener efter oktober 2026)
+        from screener import LISTOR, horizon_lists
+        for key, d in horizon_lists(df).items():
+            namn, metod = LISTOR[key]
+            listor[key] = {"namn": namn, "metod": metod, "rader": [{
+                "rank": i + 1, "ticker": r.ticker, "namn": str(r.namn), "sektor": str(r.sektor),
+                "kvalitet": int(r.kvalitetspoäng), "ai": badge(r.ticker),
+                "kort_6m": num(r.kort_6m), "säsong_6m": num(r.säsong_6m), "momentum": num(r.momentum_12m),
+                "årlig_3år": num(r.årlig_3år), "årlig_10år": num(r.årlig_10år),
+                "förväntad": num(r.förväntad_avkastning), "lång_kvalitet": num(r.lång_kvalitet),
+            } for i, r in enumerate(d.head(25).itertuples())]}
     rows = [{
         "rank": int(r.rank), "ticker": r.ticker, "namn": str(r.namn), "sektor": str(r.sektor),
         "förväntad": num(r.förväntad_avkastning), "kvalitet": int(r.kvalitetspoäng),
-        "volatilitet": num(r.volatilitet), "ai": (ai.get(r.ticker) or {}).get("betyg"),
+        "volatilitet": num(r.volatilitet), "ai": badge(r.ticker),
     } for r in df.head(30).itertuples()]
     out = {
         "period": period.replace("-", "–"), "datum": csv.split("_")[2][:10], "antal": len(df),
-        "universum": "S&P 500", "rader": rows, "rapport": "rapporter/" + csv.replace(".csv", ".html"),
+        "universum": "S&P 500", "rader": rows, "listor": listor,
+        "rapport": "rapporter/" + csv.replace(".csv", ".html"),
     }
     os.makedirs(DATA, exist_ok=True)
     with open(os.path.join(DATA, "ranking.json"), "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False)
-    print(f"Topplista: {len(rows)} rader från {csv}")
+    print(f"Topplista: {len(rows)} rader, {len(listor)} tidshorisonter, från {csv}")
 
 
 def make_icons():

@@ -1,0 +1,42 @@
+name: Nya börsnoteringar
+
+# Uppdaterar listan över aktier som börsnoterats i USA det senaste året.
+# Varje vardagskväll efter att börsen i New York stängt (och när du startar den manuellt).
+on:
+  schedule:
+    - cron: "30 21 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: nya-noteringar
+
+jobs:
+  ipo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installera paket
+        run: pip install -r requirements.txt
+
+      - name: Hämta nya börsnoteringar
+        run: python ipo.py
+
+      - name: Spara
+        run: |
+          git config user.name "aktieagent"
+          git config user.email "aktieagent@users.noreply.github.com"
+          git add docs/data/ipos.json
+          git diff --cached --quiet || git commit -m "Nya börsnoteringar $(date +%Y-%m-%d)"
+          git pull --rebase origin main
+          git push

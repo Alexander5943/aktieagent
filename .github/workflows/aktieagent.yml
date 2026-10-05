@@ -1,6 +1,6 @@
 name: Topplista
 
-# Rangordnar S&P 500 efter förväntad avkastning den 1:a varje månad (och när du startar den manuellt).
+# Rangordnar S&P 500 för tre tidshorisonter (1–6 mån, 1–3 år, 5–10 år) den 1:a varje månad (och när du startar den manuellt).
 # Bevakningslistan sköts av servern (worker/), inte här.
 on:
   schedule:
@@ -30,7 +30,10 @@ jobs:
       - name: Installera paket
         run: pip install -r requirements.txt
 
-      - name: Screener (S&P 500, AI på topp 10)
+      - name: Kontrollera att modellen räknar likadant som servern
+        run: python test_modell.py
+
+      - name: Screener (S&P 500, AI på topp 10 för 1–3 år)
         run: |
           python screener.py --ai-top 10 --out-dir docs/rapporter
           python screener.py --utvardera > docs/utvardering.txt || true

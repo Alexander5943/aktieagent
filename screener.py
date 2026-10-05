@@ -35,6 +35,7 @@ import numpy as np
 import pandas as pd
 
 import aktieagent as A
+import modell
 
 CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache", date.today().isoformat())
 
@@ -97,7 +98,7 @@ def batch_history(tickers: list[str], demo: bool) -> dict[str, pd.DataFrame]:
     chunks = [tickers[i:i + 200] for i in range(0, len(tickers), 200)]
     for n, chunk in enumerate(chunks, 1):
         print(f"  kurser: paket {n}/{len(chunks)}", end="\r")
-        df = yf.download(chunk, period="2y", group_by="ticker", auto_adjust=True,
+        df = yf.download(chunk, period="10y", group_by="ticker", auto_adjust=True,
                          threads=True, progress=False)
         for t in chunk:
             try:
@@ -243,7 +244,8 @@ def screen(tickers, demo, min_mcap, min_dollar_vol, max_price, min_price, worker
         info = get_info(tk, demo)
         if not info or (info.get("quoteType") not in (None, "EQUITY")):
             return None
-        d = A.StockData(tk, info, hists[tk], None, None)
+        h10 = hists[tk]
+        d = A.StockData(tk, info, h10.iloc[-504:], None, None)  # 2 år räcker för trend och risk
         f, t = A.fundamentals(d), A.technicals(d.history)
         if not f["börsvärde"] or f["börsvärde"] < min_mcap:
             return None
@@ -252,7 +254,8 @@ def screen(tickers, demo, min_mcap, min_dollar_vol, max_price, min_price, worker
         er = expected_return(f, t, est)
         if er["förväntad"] is None:
             return None
-        return {
+        hz = horizon_fields(f, t, est, info, er["förväntad"], h10["Close"], s)
+        return hz | {
             "ticker": tk, "namn": f["namn"], "sektor": f["sektor"] or "–",
             "kurs": t["kurs"], "börsvärde": f["börsvärde"],
             "förväntad_avkastning": er["förväntad"],
@@ -284,6 +287,72 @@ def screen(tickers, demo, min_mcap, min_dollar_vol, max_price, min_price, worker
     df = pd.DataFrame(rows)
     print(f"  {len(df)} aktier med tillräcklig data")
     return df
+
+
+# ---------------------------------------------------------------------------
+# 4b. TRE TIDSHORISONTER: 1–6 månader, 1–3 år, 5–10 år
+# ---------------------------------------------------------------------------
+
+def horizon_fields(f, t, est, info, er1, close, s) -> dict:
+    """Extra kolumner för topplistorna per tidshorisont."""
+    price = t["kurs"]
+    mf = {
+        "eps_nästa_år": est.get("eps_nästa_år"), "forward_pe": f.get("forward_pe"),
+        "vinsttillväxt_nästa_år": est.get("vinsttillväxt_nästa_år"),
+        "omsättningstillväxt_nästa_år": est.get("omsättningstillväxt_nästa_år"),
+        "omsättningstillväxt": f.get("omsättningstillväxt"), "vinsttillväxt": f.get("vinsttillväxt"),
+        "ps": f.get("ps"), "bruttomarginal": f.get("bruttomarginal"), "roe": f.get("roe"),
+        "rörelsemarginal": f.get("rörelsemarginal"), "utdelning": A._num(info.get("trailingAnnualDividendYield")),
+    }
+    hz = modell.horizons(mf, price, er1)
+
+    # 1–6 månader: analytikernas uppsida (halva), säsongsmönster och momentum
+    means = modell.monthly_means(close)
+    seas6 = modell.seasonal_ahead(means, date.today().month, 6)
+    c = close.dropna()
+    mom = float(c.iloc[-22] / c.iloc[-253] - 1) if len(c) > 253 else None  # 12 mån utom senaste månaden
+    parts, w = {}, {"analytiker": 0.4, "säsong": 0.3, "momentum": 0.3}
+    if f.get("analytiker_riktkurs") and (f.get("antal_analytiker") or 0) >= 3:
+        parts["analytiker"] = 0.5 * float(np.clip(f["analytiker_riktkurs"] / price - 1, -0.5, 1.0))
+    if seas6 is not None:
+        parts["säsong"] = 0.5 * seas6 + 0.5 * 0.04  # mönster upprepas inte alltid: väg mot ett normalt halvår
+    if mom is not None:
+        parts["momentum"] = 0.04 + float(np.clip(mom, -0.5, 1.0)) * 0.15
+    kort = sum(parts[k] * w[k] for k in parts) / sum(w[k] for k in parts) if parts else None
+    if kort is not None and t.get("sma200") and price < t["sma200"]:
+        kort -= 0.03  # under 200-dagars snitt: nedåttrend
+    ar = s["områden"]
+    long_q = [x for x in (ar.get("Lönsamhet"), ar.get("Finansiell styrka")) if x is not None]
+    return {
+        "kort_6m": kort, "säsong_6m": seas6, "momentum_12m": mom,
+        "årlig_3år": hz.get(3), "årlig_5år": hz.get(5), "årlig_10år": hz.get(10),
+        "lång_kvalitet": sum(long_q) / len(long_q) * 10 if long_q else None,
+        "vinstbolag": bool(mf["eps_nästa_år"] and mf["eps_nästa_år"] > 0) or bool(f.get("forward_pe") and f["forward_pe"] > 0),
+    }
+
+
+LISTOR = {
+    "kort": ("1–6 månader", "Analytikernas uppsida, säsongsmönster och kursmomentum"),
+    "mellan": ("1–3 år", "Förväntad avkastning per år de kommande 3 åren, och bolagets kvalitet"),
+    "lang": ("5–10 år", "Förväntad avkastning per år i 10 år, lönsamhet och finansiell styrka"),
+}
+
+
+def horizon_lists(df: pd.DataFrame, min_quality: int = 40) -> dict[str, pd.DataFrame]:
+    """Tre rangordningar av samma aktier, en per tidshorisont."""
+    d = df[df["kvalitetspoäng"] >= min_quality].copy()
+    out = {}
+    k = d.dropna(subset=["kort_6m"]).copy()
+    out["kort"] = k.sort_values("kort_6m", ascending=False)
+    m = d.dropna(subset=["årlig_3år"]).copy()
+    m["_s"] = m["årlig_3år"].rank(pct=True) * 0.6 + m["kvalitetspoäng"].rank(pct=True) * 0.4
+    out["mellan"] = m.sort_values("_s", ascending=False)
+    lg = d[d["vinstbolag"]].dropna(subset=["årlig_10år"]).copy()
+    lg["_s"] = lg["årlig_10år"].rank(pct=True) * 0.5 + lg["lång_kvalitet"].fillna(0).rank(pct=True) * 0.5
+    out["lang"] = lg.sort_values("_s", ascending=False)
+    for key in out:
+        out[key] = out[key].drop(columns=["_s"], errors="ignore").reset_index(drop=True)
+    return out
 
 
 def rank(df: pd.DataFrame, sort: str, min_quality: int) -> pd.DataFrame:
@@ -468,8 +537,10 @@ def main():
         if not os.environ.get("ANTHROPIC_API_KEY"):
             print("\n(Ingen ANTHROPIC_API_KEY - hoppar över steg 2.)")
         else:
-            print(f"\nSteg 2: AI djupanalyserar topp {a.ai_top}")
-            for tk in df["ticker"].head(a.ai_top):
+            # AI på toppen av listan 1–3 år (samma antal analyser som tidigare)
+            top = horizon_lists(df, a.min_quality)["mellan"]["ticker"].head(a.ai_top).tolist()
+            print(f"\nSteg 2: AI djupanalyserar topp {a.ai_top} på listan 1–3 år")
+            for tk in top:
                 try:
                     r = A.analyze(tk, a.demo, True)
                     if r["ai"]:

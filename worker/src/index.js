@@ -13,11 +13,13 @@
  *   APP_KEY            din egen app-kod, så att bara du kan använda servern
  */
 
+import { horizons, valuation, hype, seasonality, macro, FACTORS } from "./analys.js";
+
 const MODEL = "claude-opus-5-5";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 const AI_CACHE_DAYS = 7;          // en AI-analys återanvänds i 7 dagar om du inte ber om en ny
 const DEFAULT_AI_DAILY_LIMIT = 25; // skydd mot att krediterna tar slut av misstag
-const CRON_MAX_STOCKS = 8;         // Cloudflares gratisplan tillåter ~50 anrop per körning
+const CRON_MAX_STOCKS = 3;         // per körning (måndag kl 05, 06 och 07 UTC = högst 9 i veckan). Gratisplanen tillåter 50 anrop per körning
 
 // ---------------------------------------------------------------------------
 // Router
@@ -46,7 +48,7 @@ export default {
     }
   },
 
-  // Varje måndag: uppdatera AI-analysen för bevakningslistan (äldsta först)
+  // Varje måndag (två körningar): uppdatera AI-analysen för bevakningslistan, äldsta först
   async scheduled(event, env, ctx) {
     const list = await getWatchlist(env);
     const withAge = await Promise.all(list.map(async (w) => {
@@ -54,7 +56,8 @@ export default {
       return { t: w.t, at: c ? c.analyserad : 0 };
     }));
     withAge.sort((a, b) => a.at - b.at);
-    for (const w of withAge.slice(0, CRON_MAX_STOCKS)) {
+    const due = withAge.filter((w) => Date.now() - w.at > 6 * 86400e3);
+    for (const w of due.slice(0, CRON_MAX_STOCKS)) {
       try { await runAI(w.t, env, ctx, true, true); } catch (e) { console.log("cron", w.t, e.message); }
     }
   },
@@ -125,7 +128,7 @@ async function getCrumb(env, refresh = false) {
 }
 
 async function quoteSummary(t, env) {
-  const modules = "price,summaryProfile,summaryDetail,financialData,defaultKeyStatistics,earningsTrend,calendarEvents";
+  const modules = "price,assetProfile,summaryDetail,financialData,defaultKeyStatistics,earningsTrend,calendarEvents,majorHoldersBreakdown,institutionOwnership";
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const c = await getCrumb(env, attempt > 0);
@@ -149,8 +152,8 @@ async function search(q, ctx) {
   });
 }
 
-async function chart(t, range) {
-  const d = await yget(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(t)}?range=${range}&interval=1d&includePrePost=false`);
+async function chart(t, range, interval = "1d") {
+  const d = await yget(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(t)}?range=${range}&interval=${interval}&includePrePost=false`);
   const r = d.chart && d.chart.result && d.chart.result[0];
   if (!r || !r.timestamp) throw httpError(`Hittade ingen kursdata för ${t}.`, 404);
   const q = r.indicators.quote[0];
@@ -165,7 +168,7 @@ async function chart(t, range) {
 
 async function quotes(symbols, ctx) {
   symbols = symbols.map((s) => s.trim().toUpperCase()).filter(Boolean).slice(0, 40);
-  const out = await Promise.all(symbols.map((t) => cached("q:" + t, 300, ctx, async () => {
+  const out = await Promise.all(symbols.map((t) => cached("q:" + t, 60, ctx, async () => {
     try {
       const { meta, rows } = await chart(t, "1mo");
       const price = meta.regularMarketPrice;
@@ -213,7 +216,7 @@ const avg = (xs) => { xs = xs.filter((x) => x != null && isFinite(x)); return xs
 function fundamentals(qs) {
   if (!qs) return null;
   const fd = qs.financialData || {}, sd = qs.summaryDetail || {}, ks = qs.defaultKeyStatistics || {};
-  const pr = qs.price || {}, sp = qs.summaryProfile || {};
+  const pr = qs.price || {}, sp = qs.assetProfile || qs.summaryProfile || {};
   const trend = (qs.earningsTrend && qs.earningsTrend.trend) || [];
   const y0 = trend.find((x) => x.period === "0y") || {}, y1 = trend.find((x) => x.period === "+1y") || {};
   const eps0 = raw(y0.earningsEstimate && y0.earningsEstimate.avg), eps1 = raw(y1.earningsEstimate && y1.earningsEstimate.avg);
@@ -222,7 +225,10 @@ function fundamentals(qs) {
   const ed = qs.calendarEvents && qs.calendarEvents.earnings && qs.calendarEvents.earnings.earningsDate;
   return {
     namn: pr.longName || pr.shortName, sektor: sp.sector || null, bransch: sp.industry || null,
-    beskrivning: sp.longBusinessSummary ? sp.longBusinessSummary.slice(0, 600) : null, webb: sp.website || null,
+    beskrivning: sp.longBusinessSummary ? sp.longBusinessSummary.slice(0, 2500) : null, webb: sp.website || null,
+    anställda: raw(sp.fullTimeEmployees), land: sp.country || null, stad: sp.city || null,
+    vd: ((sp.companyOfficers || []).find((o) => /CEO|Chief Executive/i.test(o.title || "")) || {}).name || null,
+    ägare: owners(qs),
     börsvärde: raw(pr.marketCap) ?? raw(sd.marketCap), valuta: pr.currency || null,
     pe: raw(sd.trailingPE), forward_pe: raw(sd.forwardPE) ?? raw(ks.forwardPE), peg: raw(ks.pegRatio),
     ps: raw(sd.priceToSalesTrailing12Months), ev_ebitda: raw(ks.enterpriseToEbitda),
@@ -230,7 +236,7 @@ function fundamentals(qs) {
     bruttomarginal: raw(fd.grossMargins), rörelsemarginal: raw(fd.operatingMargins), vinstmarginal: raw(fd.profitMargins),
     roe: raw(fd.returnOnEquity), skuld_eget_kapital: raw(fd.debtToEquity), current_ratio: raw(fd.currentRatio),
     kassa: raw(fd.totalCash), skuld: raw(fd.totalDebt), fritt_kassaflöde: raw(fd.freeCashflow),
-    beta: raw(sd.beta), utdelning: raw(sd.dividendYield), blankning: raw(ks.shortPercentOfFloat),
+    beta: raw(sd.beta), utdelning: raw(sd.trailingAnnualDividendYield) ?? raw(sd.dividendYield), blankning: raw(ks.shortPercentOfFloat),
     högsta_52v: raw(sd.fiftyTwoWeekHigh), lägsta_52v: raw(sd.fiftyTwoWeekLow),
     riktkurs: raw(fd.targetMeanPrice), riktkurs_hög: raw(fd.targetHighPrice), riktkurs_låg: raw(fd.targetLowPrice),
     analytiker_råd: fd.recommendationKey || null, antal_analytiker: raw(fd.numberOfAnalystOpinions),
@@ -238,6 +244,14 @@ function fundamentals(qs) {
     omsättningstillväxt_nästa_år: raw(y1.revenueEstimate && y1.revenueEstimate.growth),
     nästa_rapport: ed && ed[0] ? new Date(raw(ed[0]) * 1000).toISOString().slice(0, 10) : null,
   };
+}
+
+function owners(qs) {
+  const mh = qs.majorHoldersBreakdown || {}, io = (qs.institutionOwnership && qs.institutionOwnership.ownershipList) || [];
+  const största = io.slice(0, 8).map((o) => ({ namn: o.organization, andel: raw(o.pctHeld), värde: raw(o.value), datum: o.reportDate && o.reportDate.fmt ? o.reportDate.fmt : null }))
+    .filter((o) => o.namn);
+  const out = { insiders: raw(mh.insidersPercentHeld), institutioner: raw(mh.institutionsPercentHeld), antal_institutioner: raw(mh.institutionsCount), största };
+  return out.insiders == null && out.institutioner == null && !största.length ? null : out;
 }
 
 function technicals(rows) {
@@ -249,8 +263,8 @@ function technicals(rows) {
   let gain = 0, loss = 0; for (let i = n - 14; i < n; i++) { const d = c[i] - c[i - 1]; if (d > 0) gain += d; else loss -= d; }
   const two = c.slice(-504); let peak = two[0], mdd = 0; for (const x of two) { peak = Math.max(peak, x); mdd = Math.min(mdd, x / peak - 1); }
   return {
-    kurs: last, förändring_1d: change(1), förändring_1m: change(21), förändring_6m: change(126), förändring_1år: change(252),
-    förändring_5år: n > 1200 ? last / c[0] - 1 : null,
+    kurs: last, förändring_1d: change(1), förändring_1m: change(21), förändring_3m: change(63), förändring_6m: change(126), förändring_1år: change(252),
+    förändring_5år: change(1260), förändring_10år: n > 2400 ? last / c[0] - 1 : null,
     sma50: sma(50), sma200: sma(200), rsi14: loss === 0 ? 100 : 100 - 100 / (1 + gain / loss),
     volatilitet: sd * Math.sqrt(252), max_drawdown_2år: mdd, sharpe_1år: sd ? (mean / sd) * Math.sqrt(252) : null,
     från_52v_högsta: last / Math.max(...c.slice(-252)) - 1,
@@ -298,17 +312,34 @@ function expectedReturn(f, t) {
   return { förväntad: keys.reduce((s, k) => s + parts[k] * w[k], 0) / tw, delar: parts };
 }
 
+// Börsen, räntan, dollarn, oljan och inflationsskyddade obligationer – veckovis i 5 år, delas av alla aktier
+async function macroSeries(ctx) {
+  const tickers = [...new Set(FACTORS.flatMap((f) => [f.t, f.mot]).filter(Boolean))];
+  const out = {};
+  await Promise.all(tickers.map(async (x) => {
+    try { out[x] = await cached("macro:" + x, 12 * 3600, ctx, async () => (await chart(x, "5y", "1wk")).rows); } catch { out[x] = []; }
+  }));
+  return out;
+}
+
 async function stock(t, env, ctx) {
-  return cached("stock:" + t, 1800, ctx, async () => {
-    const [ch, qs, fin, nw] = await Promise.all([chart(t, "5y"), quoteSummary(t, env), financials(t), news(t)]);
+  return cached("stock2:" + t, 1800, ctx, async () => {
+    const [ch, qs, fin, nw, ms] = await Promise.all([chart(t, "10y"), quoteSummary(t, env), financials(t), news(t), macroSeries(ctx).catch(() => ({}))]);
     const f = fundamentals(qs);
     const tech = technicals(ch.rows);
     const meta = ch.meta;
+    const er = expectedReturn(f, tech);
+    const safe = (fn) => { try { return fn(); } catch (e) { console.log("analys", t, e.message); return null; } };
     return {
       t, namn: (f && f.namn) || meta.longName || meta.shortName || t,
       valuta: meta.currency, börs: meta.fullExchangeName || meta.exchangeName,
       pris: meta.regularMarketPrice, idag: tech.förändring_1d,
-      historik: ch.rows, nyckeltal: f, teknik: tech, poäng: score(f, tech), förväntad: expectedReturn(f, tech),
+      historik: ch.rows, nyckeltal: f, teknik: tech, poäng: score(f, tech), förväntad: er,
+      horisonter: safe(() => horizons(f, tech, er.förväntad)),
+      värdering: safe(() => valuation(f, tech)),
+      hype: safe(() => hype(f, tech)),
+      säsong: safe(() => seasonality(ch.rows)),
+      makro: safe(() => macro(ch.rows, ms)),
       rapporter: fin, nyheter: nw, hämtad: Date.now(),
     };
   });
@@ -321,8 +352,11 @@ async function stock(t, env, ctx) {
 const SYSTEM = `Du är en noggrann och ärlig aktieanalytiker. Du skriver på svenska, i korta och enkla meningar.
 Du får aktuell data om en aktie (kurs, nyckeltal, prognoser, kvartalssiffror, poäng, nyheter).
 Använd webbsökning för att läsa bolagets SENASTE kvartalsrapport eller årsrapport och viktiga nyheter från de senaste 3 månaderna.
-Väg värdering mot tillväxt. Var tydlig med risker och med vad du är osäker på. Hitta aldrig på siffror.
-Skriv för en privatperson som investerar på 1–3 års sikt. Detta är underlag för egen analys, inte finansiell rådgivning.
+Ta också reda på bolagets affärsidé, uttalade mål och strategi (t.ex. ledningens prognoser), samt viktiga avtal, kontrakt eller partnerskap som nämns i rapporten eller nyheterna.
+Väg värdering mot tillväxt. Bedöm om aktien är under- eller övervärderad, hur mycket hype som finns kring den och vad som redan är inprisat i kursen.
+Datan innehåller en räknad modell (värdering.rimligt, värdering.inprisat.tillväxt = tillväxten kursen förutsätter, hype.poäng 0–100). Använd den som en signal, inte som facit, och säg emot den om rapporterna pekar åt ett annat håll.
+Var tydlig med risker och med vad du är osäker på. Hitta aldrig på siffror eller avtal.
+Skriv för en privatperson. Detta är underlag för egen analys, inte finansiell rådgivning.
 Avsluta ALLTID med att anropa verktyget submit_verdict.`;
 
 const VERDICT_TOOL = {
@@ -337,11 +371,17 @@ const VERDICT_TOOL = {
       sammanfattning: { type: "string", description: "3–5 korta meningar." },
       senaste_rapport: { type: "string", description: "Vad senaste rapporten visade, med period och viktigaste siffror. 2–4 meningar." },
       vardering: { type: "string", description: "Är aktien dyr eller billig i förhållande till tillväxten? Varför?" },
+      vardering_lage: { type: "string", enum: ["Undervärderad", "Rimligt värderad", "Övervärderad"], description: "Din samlade bedömning efter rapporter, analyser och hype." },
+      inprisat: { type: "string", description: "Vad kursen redan räknar med (tillväxt, marginaler, framtida produkter) och om det är rimligt. 2–3 meningar." },
+      hype: { type: "string", description: "Hur mycket hype, förväntningar och uppmärksamhet som finns kring aktien just nu, och om den är befogad. 1–3 meningar." },
+      ide: { type: "string", description: "Bolagets affärsidé: vad de säljer, till vem och hur de tjänar pengar. 2–3 enkla meningar." },
+      mal: { type: "string", description: "Bolagets uttalade mål, strategi och prognoser framåt. 2–3 meningar." },
+      kontrakt: { type: "array", items: { type: "string" }, description: "Viktiga avtal, kontrakt eller partnerskap som nämns i källorna (med datum om möjligt). Tom lista om du inte hittat några." },
       styrkor: { type: "array", items: { type: "string" }, description: "3–5 korta punkter." },
       risker: { type: "array", items: { type: "string" }, description: "3–5 korta punkter." },
       att_bevaka: { type: "array", items: { type: "string" }, description: "Vad som skulle ändra bedömningen." },
     },
-    required: ["betyg", "sakerhet", "kort", "sammanfattning", "senaste_rapport", "vardering", "styrkor", "risker", "att_bevaka"],
+    required: ["betyg", "sakerhet", "kort", "sammanfattning", "senaste_rapport", "vardering", "vardering_lage", "inprisat", "hype", "ide", "mal", "styrkor", "risker", "att_bevaka"],
   },
 };
 
@@ -364,14 +404,20 @@ async function runAI(t, env, ctx, force = false, fromCron = false) {
   await env.AKTIE_KV.put("aicount:" + day, String(used + 1), { expirationTtl: 3 * 86400 });
 
   const s = await stock(t, env, ctx);
-  const data = { ...s, historik: undefined, hämtad: undefined };
+  // Skicka inte stora tabeller till AI:n (kostar bara pengar)
+  const data = {
+    ...s, historik: undefined, hämtad: undefined,
+    värdering: s.värdering ? { ...s.värdering, inprisat: { ...s.värdering.inprisat, tabell: undefined } } : null,
+    säsong: s.säsong ? { bästa: s.säsong.bästa, sämsta: s.säsong.sämsta, strategi: s.säsong.strategi && { ...s.säsong.strategi, affärer: undefined } } : null,
+    nyckeltal: s.nyckeltal ? { ...s.nyckeltal, beskrivning: s.nyckeltal.beskrivning && s.nyckeltal.beskrivning.slice(0, 800) } : null,
+  };
   const today = new Date().toISOString().slice(0, 10);
   const messages = [{ role: "user", content: `Dagens datum: ${today}. Analysera aktien ${t} (${s.namn}). Är den en bra investering just nu?\n\nData:\n${JSON.stringify(data)}` }];
   const tools = [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }, VERDICT_TOOL];
   const sources = new Map();
 
   for (let round = 0; round < 5; round++) {
-    const body = { model: MODEL, max_tokens: 4000, system: SYSTEM, tools, messages };
+    const body = { model: MODEL, max_tokens: 6000, system: SYSTEM, tools, messages };
     if (round === 4) body.tool_choice = { type: "tool", name: "submit_verdict" };
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -394,6 +440,8 @@ async function runAI(t, env, ctx, force = false, fromCron = false) {
       const out = {
         t, betyg: i.betyg || s.poäng.bedömning, säkerhet: i.sakerhet || "Låg", kort: i.kort || "",
         sammanfattning: i.sammanfattning || "", senaste_rapport: i.senaste_rapport || "", värdering: i.vardering || "",
+        värderingsläge: i.vardering_lage || null, inprisat: i.inprisat || "", hype: i.hype || "", idé: i.ide || "", mål: i.mal || "",
+        kontrakt: Array.isArray(i.kontrakt) ? i.kontrakt.slice(0, 8) : [],
         styrkor: i.styrkor || [], risker: i.risker || [], att_bevaka: i.att_bevaka || [],
         källor: [...sources.values()].slice(0, 8), poäng: s.poäng.total, pris_vid_analys: s.pris,
         modell: MODEL, analyserad: Date.now(),
@@ -429,4 +477,4 @@ async function editWatchlist(body, env) {
 }
 
 // Exporteras för tester
-export const _test = { fundamentals, technicals, score, expectedReturn, editWatchlist, runAI, stock, search };
+export const _test = { fundamentals, technicals, score, expectedReturn, editWatchlist, runAI, stock, search, macroSeries };

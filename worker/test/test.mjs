@@ -44,6 +44,63 @@ await test("aktiedata: historik, nyckeltal, poäng, förväntad avkastning, rapp
   assert.ok(d.teknik.rsi14 >= 0 && d.teknik.rsi14 <= 100);
 });
 
+await test("förväntad avkastning 1, 3, 5 och 10 år med kursmål", async () => {
+  const d = await (await call(makeEnv(), "/api/stock?t=NVDA")).json();
+  const h = d.horisonter;
+  assert.deepEqual(h.rader.map((r) => r.år), [1, 3, 5, 10]);
+  for (const r of h.rader) {
+    assert.ok(Math.abs((1 + r.årlig) ** r.år - 1 - r.total) < 1e-9, "total stämmer med årlig");
+    assert.ok(r.låg < r.kurs && r.kurs < r.hög, "kursmål ligger i spannet");
+    assert.ok(r.årlig >= -0.5 && r.årlig <= 1);
+  }
+  assert.ok(Math.abs(h.rader[0].årlig - d.förväntad.förväntad) < 1e-9, "1 år = 12-månadersmodellen");
+  assert.ok(d.historik.length > 2400, "10 år historik");
+});
+
+await test("värdering: rimligt värde, läge och inprisad tillväxt", async () => {
+  const d = await (await call(makeEnv(), "/api/stock?t=NVDA")).json();
+  const v = d.värdering;
+  assert.ok(v.rimligt > 0);
+  assert.ok(Math.abs(d.teknik.kurs / v.rimligt - 1 - v.gap) < 1e-9);
+  assert.ok(["Kraftigt undervärderad", "Undervärderad", "Rimligt värderad", "Övervärderad", "Kraftigt övervärderad"].includes(v.läge));
+  assert.ok(v.inprisat.tillväxt > -0.3 && v.inprisat.tillväxt < 0.9);
+  // Högre kurs ska kräva högre tillväxt
+  const tab = v.inprisat.tabell;
+  assert.ok(tab.length > 10);
+  for (let i = 1; i < tab.length; i++) assert.ok(tab[i][1] >= tab[i - 1][1] - 1e-6, "tabellen stiger");
+  assert.ok(d.hype.poäng >= 0 && d.hype.poäng <= 100);
+});
+
+await test("bolagsinfo: VD, anställda, ägare", async () => {
+  const d = await (await call(makeEnv(), "/api/stock?t=NVDA")).json();
+  assert.equal(d.nyckeltal.vd, "Jane Doe");
+  assert.equal(d.nyckeltal.anställda, 36000);
+  assert.equal(d.nyckeltal.ägare.största[0].namn, "Vanguard Group Inc");
+  assert.ok(Math.abs(d.nyckeltal.ägare.institutioner - 0.68) < 1e-9);
+});
+
+await test("säsong: hittar mönstret i en aktie som stiger i november och faller i september", async () => {
+  const d = await (await call(makeEnv(), "/api/stock?t=SEAS")).json();
+  const s = d.säsong;
+  assert.equal(s.månader.length, 12);
+  assert.equal(s.bästa[0], 11, "november bäst");
+  assert.equal(s.sämsta[0], 9, "september sämst");
+  assert.ok([9, 10].includes(s.strategi.köp_efter), "köp efter september/oktober, var " + s.strategi.köp_efter);
+  assert.ok(s.strategi.snitt > 0.03 && s.strategi.andel_rätt >= 0.75, "strategin lönar sig");
+  assert.ok(s.år.length >= 9 && s.år[0].r.length === 12);
+});
+
+await test("makrokänslighet: hittar beta mot börsen", async () => {
+  const d = await (await call(makeEnv(), "/api/stock?t=NVDA")).json();
+  const m = d.makro;
+  assert.ok(m && m.veckor > 150, "minst 150 veckor, var " + (m && m.veckor));
+  assert.ok(Math.abs(m.beta - 1.3) < 0.2, "beta nära 1,3, var " + m.beta);
+  assert.deepEqual(m.faktorer.map((f) => f.id), ["marknad", "ranta", "dollar", "olja", "inflation"]);
+  const r = m.faktorer.find((f) => f.id === "ranta");
+  assert.equal(r.enhet, "procentenheter");
+  assert.ok(m.förklaringsgrad > 0.3 && m.förklaringsgrad < 1);
+});
+
 await test("okänd ticker ger 404", async () => {
   const r = await call(makeEnv(), "/api/stock?t=NOPE");
   assert.equal(r.status, 404);
@@ -79,6 +136,9 @@ await test("AI-analys: betyg, svenska fältnamn tillbaka, källor, cache", async
   assert.equal(a.betyg, "Köpvärd");
   assert.equal(a.säkerhet, "Medel");
   assert.ok(a.värdering.includes("P/E"));
+  assert.equal(a.värderingsläge, "Rimligt värderad");
+  assert.ok(a.idé && a.mål && a.hype && a.inprisat);
+  assert.equal(a.kontrakt.length, 1);
   assert.equal(a.källor[0].länk, "https://investor.example.com/q2-2026");
   await call(env, "/api/ai?t=NVDA", { method: "POST" }); // ska komma från cachen
   assert.equal(calls.filter((u) => u.includes("anthropic")).length, n0 + 1, "andra anropet ska inte kosta");
@@ -113,6 +173,10 @@ await test("måndagskörning uppdaterar bevakningslistan", async () => {
   for (const t of ["NVDA", "MU"]) await call(env, "/api/watchlist", { method: "POST", body: { action: "add", t } });
   await worker.scheduled({}, env, ctx);
   assert.ok(env._kv.has("ai:NVDA") && env._kv.has("ai:MU"));
+  // Färska analyser görs inte om
+  const n = calls.filter((u) => u.includes("anthropic")).length;
+  await worker.scheduled({}, env, ctx);
+  assert.equal(calls.filter((u) => u.includes("anthropic")).length, n);
 });
 
 console.log(failed ? `\n${failed} test misslyckades` : "\nAlla test gick igenom");
