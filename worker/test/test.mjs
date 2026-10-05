@@ -179,5 +179,57 @@ await test("måndagskörning uppdaterar bevakningslistan", async () => {
   assert.equal(calls.filter((u) => u.includes("anthropic")).length, n);
 });
 
+await test("portfölj: lägg till, ändra, ta bort, felaktiga värden", async () => {
+  installMocks();
+  const env = makeEnv();
+  assert.deepEqual(await (await call(env, "/api/portfolio")).json(), []);
+  await call(env, "/api/portfolio", { method: "POST", body: { action: "set", t: "nvda", namn: "NVIDIA", antal: 10, gav: 120 } });
+  let l = await (await call(env, "/api/portfolio", { method: "POST", body: { action: "set", t: "NVDA", antal: 15, gav: 110 } })).json();
+  assert.equal(l.length, 1); assert.equal(l[0].antal, 15); assert.equal(l[0].namn, "NVDA");
+  let r = await call(env, "/api/portfolio", { method: "POST", body: { action: "set", t: "MU", antal: -1, gav: 10 } });
+  assert.equal(r.status, 400);
+  r = await call(env, "/api/portfolio", { method: "POST", body: { action: "set", t: "MU", antal: 5, gav: "abc" } });
+  assert.equal(r.status, 400);
+  l = await (await call(env, "/api/portfolio", { method: "POST", body: { action: "remove", t: "NVDA" } })).json();
+  assert.deepEqual(l, []);
+});
+
+await test("signal: det viktigaste om en aktie i liten form", async () => {
+  const d = await (await call(makeEnv(), "/api/signal?t=NVDA")).json();
+  assert.equal(d.t, "NVDA");
+  assert.ok(d.horisonter["3"].årlig != null && d.horisonter["10"].kurs > 0);
+  assert.ok(d.värdering.läge && d.hype.poäng >= 0 && d.poäng > 0);
+  assert.ok(JSON.stringify(d).length < 2000, "liten nog");
+});
+
+await test("AI-råd för portföljen: bara alternativ ur listan, bara egna innehav, sparas", async () => {
+  installMocks();
+  const env = makeEnv();
+  assert.equal((await call(env, "/api/portfolio/advice", { method: "POST", body: {} })).status, 400, "tom portfölj");
+  await call(env, "/api/portfolio", { method: "POST", body: { action: "set", t: "NVDA", antal: 10, gav: 100 } });
+  await call(env, "/api/portfolio", { method: "POST", body: { action: "set", t: "MU", antal: 20, gav: 90 } });
+  const sigs = [await (await call(env, "/api/signal?t=NVDA")).json(), await (await call(env, "/api/signal?t=MU")).json()];
+  const kand = [{ t: "MSFT", namn: "Microsoft", årlig_3år: 0.14, lista: "1–3 år" }, { t: "NVDA", namn: "NVIDIA", årlig_3år: 0.2 }, { t: "<x>", namn: "hack" }];
+  const a = await (await call(env, "/api/portfolio/advice", { method: "POST", body: { signaler: sigs, kandidater: kand } })).json();
+  assert.equal(a.innehav.length, 2, "ZZZZ ägs inte och tas bort");
+  const mu = a.innehav.find((x) => x.t === "MU");
+  assert.equal(mu.råd, "Sälj");
+  assert.deepEqual(mu.alternativ.map((x) => x.t), ["MSFT"], "bara kandidater som inte redan ägs");
+  assert.equal(a.kandidater[0].ticker, "MSFT");
+  assert.ok(Math.abs(a.efter - 0.11) < 1e-9);
+  assert.ok(!globalThis.lastAdvicePrompt.includes("<x>"), "ogiltig ticker skickas inte till AI:n");
+  assert.ok(globalThis.lastAdvicePrompt.includes("\"andel\""));
+  const g = await (await call(env, "/api/portfolio/advice")).json();
+  assert.equal(g.portfölj, "MU:20,NVDA:10");
+});
+
+await test("AI-råd: svarar AI:n med text först så frågar vi igen", async () => {
+  installMocks({ claudeMode: "textfirst" });
+  const env = makeEnv();
+  await call(env, "/api/portfolio", { method: "POST", body: { action: "set", t: "NVDA", antal: 1, gav: 100 } });
+  const a = await (await call(env, "/api/portfolio/advice", { method: "POST", body: {} })).json();
+  assert.ok(a.sammanfattning.length > 0);
+});
+
 console.log(failed ? `\n${failed} test misslyckades` : "\nAlla test gick igenom");
 process.exit(failed ? 1 : 0);

@@ -9,6 +9,7 @@ En privat aktieapp för mobilen. Du kan:
   - **säsongsmönster**: bästa och sämsta månader, varje år månad för månad, och vad strategin "köp i svagaste perioden, sälj i starkaste" har gett.
   - **makrokänslighet**: hur aktien brukar reagera på börsen, räntan, dollarn, oljan och inflationsoro.
 - **Få en AI-bedömning.** Claude läser bolagets senaste rapport och nyheter och bedömer värdering, hype och vad som är inprisat.
+- **Portfölj.** Lägg in aktierna du äger (antal och köpkurs). Du får tips per aktie – köp mer, behåll, sälj delvis eller sälj – och vid sälj förslag på aktier ur topplistorna som väntas ge mer per år. Knappen "Få AI-råd" låter Claude gå igenom hela portföljen (ungefär 1 kr).
 - **Bevaka egna aktier.** Tryck på stjärnan. AI-analysen uppdateras automatiskt varje måndag.
 - **Topplistor** för tre tidshorisonter: 1–6 månader, 1–3 år och 5–10 år (S&P 500, den 1:a varje månad).
 - **Nya börsnoteringar** i USA det senaste året, uppdaterad varje vardagskväll.

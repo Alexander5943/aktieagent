@@ -79,23 +79,25 @@
 
   // ---------- Router ----------
   let current = null;
-  function setTop(title, action = "", back = false) {
+  const GEAR = '<a class="iconbtn" href="#/installningar" aria-label="Inställningar"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg></a>';
+  function setTop(title, action = "", back = false, gear = !back) {
     $("#title").innerHTML = back ? `<button class="back" onclick="history.length>1?history.back():location.hash='#/bevakning'">‹ Tillbaka</button>` : esc(title);
-    $("#topaction").innerHTML = action;
+    $("#topaction").innerHTML = action + (gear ? GEAR : "");
   }
   function route() {
     const h = location.hash.replace(/^#\/?/, "") || "bevakning";
-    const [page, arg] = h.split("/");
+    const [page, arg, arg2] = h.split("/");
     document.querySelectorAll(".tabs a").forEach((a) => a.classList.toggle("on", a.dataset.tab === page || (page === "aktie" && a.dataset.tab === LS.get("lastTab", "bevakning"))));
     if (current && current.destroy) current.destroy();
     current = null;
     window.scrollTo(0, 0);
     if (!serverUrl() || !LS.get("key", "")) return viewLogin();
-    if (page !== "aktie") LS.set("lastTab", page);
+    if (page !== "aktie" && page !== "installningar") LS.set("lastTab", page);
     if (page === "sok") return viewSearch();
     if (page === "topp") return viewTop();
     if (page === "framtid") return viewFuture();
     if (page === "installningar") return viewSettings();
+    if (page === "portfolj") return viewPortfolio(arg === "ny" && arg2 ? decodeURIComponent(arg2).toUpperCase() : null);
     if (page === "aktie" && arg) return viewStock(decodeURIComponent(arg).toUpperCase());
     return viewWatch();
   }
@@ -103,7 +105,7 @@
 
   // ---------- Inloggning ----------
   function viewLogin() {
-    setTop("Aktier");
+    setTop("Aktier", "", false, false);
     const needServer = !CFG.workerUrl;
     view.innerHTML = `
       <div class="card">
@@ -520,6 +522,7 @@
         <div class="price"><span id="price">${num(s.pris)}</span> <span class="small muted">${esc(s.valuta || "")}</span></div>
         <div class="chg ${cls(s.idag)}" id="chg">${pct(s.idag, 2)} idag</div>
         <div class="tiny muted" id="liveinfo"></div>
+        <div class="small" style="margin-top:6px">${(() => { const h = portfolio.find((x) => x.t === t); return h ? `Du äger ${num(h.antal, h.antal % 1 ? 2 : 0)} st (köpt för ${num(h.gav)}) · <a href="#/portfolj">Se tips i portföljen</a>` : `<a href="#/portfolj/ny/${encodeURIComponent(t)}">+ Lägg till i portföljen</a>`; })()}</div>
       </div>
       <nav class="jump" id="jump" aria-label="Hoppa till">${sections.map(([id, l]) => `<button data-sec="${id}">${l}</button>`).join("")}</nav>
       <div class="card" style="padding-top:8px" id="sec-chart">
@@ -811,9 +814,242 @@
     } catch { /* ingen lista än */ }
   }
 
+  // ---------- Portfölj ----------
+  const RAD_CLS = { "Köp mer": "buy", "Behåll": "neutral", "Sälj delvis": "hold", "Sälj": "avoid" };
+  let portfolio = LS.get("portCache", []);
+  async function loadPortfolio() { portfolio = await api("/api/portfolio"); LS.set("portCache", portfolio); return portfolio; }
+  const annual = (sig) => { const h = (sig && sig.horisonter) || {}; return h[3] ? h[3].årlig : h[1] ? h[1].årlig : null; };
+
+  // Snabbregel (gratis): bygger på förväntad avkastning per år, värdering, hype, kvalitet och hur stor del av portföljen aktien är
+  function ruleTip(sig, weight) {
+    const a3 = annual(sig), gap = sig && sig.värdering ? sig.värdering.gap : null, hy = sig && sig.hype ? sig.hype.poäng : null, q = sig ? sig.poäng : null;
+    if (a3 == null) return { råd: "Behåll", skäl: ["För lite data för att räkna ut en förväntad avkastning."] };
+    const skäl = [`Förväntad avkastning ${pct(a3, 0)} per år de kommande 3 åren.`];
+    if (gap != null) skäl.push(`${sig.värdering.läge} (${pct(gap, 0)} mot rimligt värde).`);
+    if (hy != null && hy >= 65) skäl.push(`Hög hype (${hy}/100) – risk för besvikelse.`);
+    if (weight > 0.3) skäl.push(`Aktien är ${pct(weight, 0, false)} av portföljen – mycket på ett kort.`);
+    if (a3 < 0.04 || (q < 40 && (gap ?? 0) > 0.3) || (gap ?? 0) > 0.6) return { råd: "Sälj", skäl };
+    if ((hy ?? 0) >= 80 || (gap ?? 0) > 0.3 || weight > 0.35) return { råd: "Sälj delvis", skäl };
+    if (a3 >= 0.15 && (q ?? 0) >= 55 && (gap ?? 0) <= 0.15 && (hy ?? 0) < 75 && weight < 0.25) return { råd: "Köp mer", skäl };
+    return { råd: "Behåll", skäl };
+  }
+
+  // Kandidater att byta till: aktierna i topplistorna 1–3 år och 5–10 år (eller förra 12-månaderslistan)
+  async function loadCandidates() {
+    try {
+      const r = await fetch("data/ranking.json?" + Date.now()); if (!r.ok) return [];
+      const d = await r.json(), out = new Map();
+      const add = (rows, lista) => (rows || []).forEach((x) => out.has(x.ticker) || out.set(x.ticker, {
+        t: x.ticker, namn: x.namn, sektor: x.sektor, årlig_3år: x.årlig_3år ?? null, årlig_10år: x.årlig_10år ?? null,
+        förväntad: x.förväntad ?? null, kvalitet: x.kvalitet, ai: x.ai || null, lista }));
+      if (d.listor && d.listor.mellan) add(d.listor.mellan.rader, "1–3 år");
+      if (d.listor && d.listor.lang) add(d.listor.lang.rader, "5–10 år");
+      if (!out.size) add(d.rader, "12 månader");
+      return [...out.values()];
+    } catch { return []; }
+  }
+  const candAnnual = (c) => c.årlig_3år ?? c.förväntad;
+  function betterAlternatives(sig, cands, owned) {
+    const mine = annual(sig) ?? 0, sek = sig && sig.sektor;
+    return cands.filter((c) => !owned.has(c.t) && candAnnual(c) != null && candAnnual(c) > mine + 0.04)
+      .sort((a, b) => (candAnnual(b) + (b.sektor !== sek ? 0.02 : 0)) - (candAnnual(a) + (a.sektor !== sek ? 0.02 : 0))).slice(0, 3);
+  }
+
+  async function viewPortfolio(prefill) {
+    setTop("Portfölj", `<button class="star" id="addbtn">+ Lägg till</button>`);
+    const me = { destroy: () => clearInterval(timer) }; let timer = null;
+    current = me;
+    const gone = () => current !== me;
+    const sigs = {}, prices = {}, open = new Set();
+    let cands = [], advice = null, aiBusy = false;
+    view.innerHTML = `<div id="pform"></div><div id="psum"></div><div id="pai"></div><div id="plist"><div class="card"><div class="skeleton" style="height:120px"></div></div></div>
+      <p class="disclaimer">Underlag för egna beslut – inte finansiell rådgivning. Kurser i USD.</p>`;
+
+    const rows = () => {
+      const val = (x) => x.antal * (prices[x.t] ?? (sigs[x.t] && sigs[x.t].pris) ?? x.gav);
+      const total = portfolio.reduce((s, x) => s + val(x), 0);
+      return { total, list: portfolio.map((x) => { const v = val(x); return { ...x, pris: v / x.antal, värde: v, vikt: total ? v / total : 0, vinst: v - x.antal * x.gav }; }) };
+    };
+    const freshAdvice = () => advice && !advice.saknas && advice.portfölj === portfolio.map((x) => `${x.t}:${x.antal}`).sort().join(",");
+
+    function renderSummary() {
+      if (!portfolio.length) { $("#psum").innerHTML = ""; return; }
+      const { total, list } = rows();
+      const cost = portfolio.reduce((s, x) => s + x.antal * x.gav, 0), gain = total - cost;
+      const today = list.reduce((s, x) => { const i = sigs[x.t] && sigs[x.t].idag; return s + (i != null ? x.värde * (i / (1 + i)) : 0); }, 0);
+      const exp = list.reduce((s, x) => { const a = annual(sigs[x.t]); return a == null ? s : { v: s.v + a * x.vikt, w: s.w + x.vikt }; }, { v: 0, w: 0 });
+      $("#psum").innerHTML = `<div class="card"><h2>Din portfölj</h2>
+        <div class="price" style="font-size:30px">${num(total, 0)} <span class="small muted">USD</span></div>
+        <div class="grid" style="margin-top:10px">
+          <div><span>Sedan köp</span><b class="${cls(gain)}">${gain >= 0 ? "+" : "−"}${num(Math.abs(gain), 0)}</b><span class="${cls(gain)}">${pct(cost ? gain / cost : null, 1)}</span></div>
+          <div><span>Idag</span><b class="${cls(today)}">${today >= 0 ? "+" : "−"}${num(Math.abs(today), 0)}</b></div>
+          <div><span>Förväntat per år (3 år)</span><b class="${cls(exp.w ? exp.v / exp.w : null)}">${exp.w ? pct(exp.v / exp.w, 1) : "–"}</b></div>
+          <div><span>Innehav</span><b>${portfolio.length} st</b></div>
+        </div></div>`;
+    }
+
+    function renderList() {
+      const el = $("#plist");
+      if (!portfolio.length) {
+        el.innerHTML = `<div class="card empty"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v9l6.4 6.4"/></svg>
+          <p><b>Lägg in aktierna du äger</b></p><p class="small">Ange antal och vad du betalade. Du får tips om att köpa mer, behålla eller sälja – och vad du kan byta till för högre avkastning per år.</p>
+          <button class="btn" id="addfirst" style="margin-top:8px">Lägg till aktie</button></div>`;
+        $("#addfirst").onclick = () => showForm();
+        return;
+      }
+      const { list } = rows(), owned = new Set(portfolio.map((x) => x.t)), fresh = freshAdvice();
+      el.innerHTML = `<div class="card"><h2>Innehav</h2>${list.sort((a, b) => b.värde - a.värde).map((x) => {
+        const sig = sigs[x.t], rule = sig ? ruleTip(sig, x.vikt) : null;
+        const ai = fresh ? advice.innehav.find((r) => r.t === x.t) : null;
+        const råd = ai ? ai.råd : rule && rule.råd;
+        const vp = x.vinst / (x.antal * x.gav);
+        const alts = sig && rule && /Sälj/.test(råd || "") ? betterAlternatives(sig, cands, owned) : [];
+        const h = (sig && sig.horisonter) || {};
+        const kv = (k, v) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`;
+        return `<details class="hold" data-t="${esc(x.t)}" ${open.has(x.t) ? "open" : ""}><summary class="row">
+            <div class="main"><b>${esc(x.t)}</b><span>${esc(x.namn || "")}</span><span>${num(x.antal, x.antal % 1 ? 2 : 0)} st · ${num(x.värde, 0)} USD · ${pct(x.vikt, 0, false)}</span></div>
+            <div class="side"><b class="${cls(vp)}">${pct(vp, 1)}</b><span class="small muted">sedan köp</span>
+              <div style="margin-top:3px">${råd ? `<span class="pill ${RAD_CLS[råd]}">${esc(råd)}</span>` : '<span class="spinner" style="width:14px;height:14px"></span>'}</div></div></summary>
+          <div class="holdbody">
+            ${kv("Kurs nu / köpkurs", `${num(x.pris)} / ${num(x.gav)}`)}
+            ${kv("Vinst eller förlust", `<span class="${cls(x.vinst)}">${x.vinst >= 0 ? "+" : "−"}${num(Math.abs(x.vinst), 0)} USD</span>`)}
+            ${sig ? kv("Förväntat per år, 3 / 10 år", `${pct(h[3] && h[3].årlig, 0)} / ${pct(h[10] && h[10].årlig, 0)}`) : ""}
+            ${sig && sig.värdering ? kv("Värdering", esc(sig.värdering.läge)) : ""}
+            ${sig && sig.hype ? kv("Hype", `${sig.hype.poäng}/100 · ${esc(sig.hype.nivå)}`) : ""}
+            ${sig ? kv("Analysens poäng", `${sig.poäng}/100`) : ""}
+            ${ai ? `<div class="callout"><b>AI: ${esc(ai.råd)}.</b> ${esc(ai.kort)} <span class="small">${esc(ai.motivering)}</span></div>` : ""}
+            ${rule ? `<p class="small" style="margin:10px 0 4px"><b>Snabbregeln säger: ${esc(rule.råd)}</b></p><ul class="pts small">${rule.skäl.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>` : ""}
+            ${(ai && ai.alternativ.length) || alts.length ? `<h3>Bättre alternativ</h3>${(ai && ai.alternativ.length ? ai.alternativ.map((a) => {
+                const c = cands.find((k) => k.t === a.t) || (advice.kandidater || []).map((k) => ({ t: k.ticker, namn: k.namn, årlig_3år: k.per_år_3år, förväntad: k.förväntad_1år })).find((k) => k.t === a.t) || { t: a.t };
+                return { ...c, varför: a.varför };
+              }) : alts).map((c) => `<a class="row" href="#/aktie/${encodeURIComponent(c.t)}"><div class="main"><b>${esc(c.t)}</b><span>${esc(c.varför || c.namn || "")}</span></div>
+                <div class="side"><b class="${cls(candAnnual(c))}">${pct(candAnnual(c), 0)}</b><span class="small muted">${c.årlig_3år != null ? "per år" : "12 mån"}</span></div></a>`).join("")}` : ""}
+            <div class="btnrow"><a class="btn sec" href="#/aktie/${encodeURIComponent(x.t)}">Öppna aktien</a><button class="btn sec" data-edit="${esc(x.t)}">Ändra</button><button class="btn sec" data-del="${esc(x.t)}">Ta bort</button></div>
+          </div></details>`;
+      }).join("")}</div>`;
+      el.querySelectorAll("details.hold").forEach((d) => d.addEventListener("toggle", () => (d.open ? open.add(d.dataset.t) : open.delete(d.dataset.t))));
+      el.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => showForm(portfolio.find((x) => x.t === b.dataset.edit))));
+      el.querySelectorAll("[data-del]").forEach((b) => (b.onclick = async () => {
+        if (!confirm(`Ta bort ${b.dataset.del} från portföljen?`)) return;
+        try { portfolio = await api("/api/portfolio", { method: "POST", body: { action: "remove", t: b.dataset.del } }); LS.set("portCache", portfolio); toast(`${b.dataset.del} borttagen`); renderAll(); }
+        catch (e) { toast(e.message); }
+      }));
+    }
+
+    function renderAI() {
+      const el = $("#pai");
+      if (!portfolio.length) { el.innerHTML = ""; return; }
+      if (aiBusy) { el.innerHTML = `<div class="card"><h2>AI-råd för portföljen</h2><p class="small muted" style="display:flex;gap:10px;align-items:center"><span class="spinner" style="flex-shrink:0"></span>AI:n går igenom dina innehav och jämför med topplistorna. Tar 20–60 sekunder.</p></div>`; return; }
+      if (!advice || advice.saknas) {
+        el.innerHTML = `<div class="card"><h2>AI-råd för portföljen</h2>
+          <p class="small muted">AI:n går igenom hela portföljen: vad du bör köpa mer av, behålla eller sälja, och vilka aktier ur topplistorna du kan byta till för högre avkastning per år. Kostar ungefär 1 kr.</p>
+          <button class="btn" id="runadv">Få AI-råd</button></div>`;
+      } else {
+        const stale = !freshAdvice();
+        el.innerHTML = `<div class="card"><h2>AI-råd för portföljen</h2>
+          ${stale ? `<p class="small" style="color:var(--warn)">Portföljen har ändrats sedan rådet gavs. Gör ett nytt för att få med ändringarna.</p>` : ""}
+          <p>${esc(advice.sammanfattning)}</p>
+          ${advice.före != null && advice.efter != null ? `<div class="grid" style="margin:8px 0"><div><span>Förväntat per år nu</span><b>${pct(advice.före, 1)}</b></div><div><span>Om du följer råden</span><b class="${cls(advice.efter - advice.före)}">${pct(advice.efter, 1)}</b></div></div>` : ""}
+          ${advice.innehav.map((r) => `<div class="row" style="align-items:flex-start"><div class="main"><b>${esc(r.t)}</b><span style="white-space:normal">${esc(r.kort)}</span>
+            ${r.alternativ.length ? `<span style="white-space:normal">Byt till: ${r.alternativ.map((a) => `<a href="#/aktie/${encodeURIComponent(a.t)}">${esc(a.t)}</a>`).join(", ")}</span>` : ""}</div>
+            <div class="side"><span class="pill ${RAD_CLS[r.råd]}">${esc(r.råd)}</span></div></div>`).join("")}
+          ${advice.att_tänka_på && advice.att_tänka_på.length ? `<h3>Att tänka på</h3><ul class="pts small">${advice.att_tänka_på.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+          <p class="tiny muted" style="margin:10px 0">Gjort ${esc(ago(advice.skapad))}. Tryck på ett innehav nedan för motiveringen.</p>
+          <button class="btn sec" id="runadv">Gör ett nytt AI-råd</button></div>`;
+      }
+      $("#runadv").onclick = async () => {
+        aiBusy = true; renderAI();
+        try {
+          advice = await api("/api/portfolio/advice", { method: "POST", body: { signaler: Object.values(sigs), kandidater: cands } });
+        } catch (e) { toast(e.message); }
+        aiBusy = false;
+        if (!gone()) renderAll();
+      };
+    }
+
+    function renderAll() { renderSummary(); renderAI(); renderList(); }
+
+    // Formulär för att lägga till eller ändra ett innehav
+    function showForm(edit, t0) {
+      const f = $("#pform");
+      let pick = edit ? { t: edit.t, namn: edit.namn } : t0 ? { t: t0, namn: t0 } : null;
+      f.innerHTML = `<div class="card"><h2>${edit ? `Ändra ${esc(edit.t)}` : "Lägg till aktie"}</h2>
+        ${edit ? "" : `<div class="field"><label for="pq">Aktie</label><input id="pq" type="search" placeholder="Sök bolag eller ticker" autocomplete="off" autocapitalize="characters" value="${esc(t0 || "")}"></div><div id="psug"></div>`}
+        <div class="field"><label for="pantal">Antal aktier</label><input id="pantal" type="number" inputmode="decimal" min="0" step="any" value="${edit ? esc(edit.antal) : ""}"></div>
+        <div class="field"><label for="pgav">Köpkurs per aktie (USD)</label><input id="pgav" type="number" inputmode="decimal" min="0" step="any" value="${edit ? esc(edit.gav) : ""}" placeholder="Snittpriset du betalade"></div>
+        <div class="btnrow"><button class="btn" id="psave">Spara</button><button class="btn sec" id="pcancel">Avbryt</button></div></div>`;
+      f.scrollIntoView({ behavior: "smooth", block: "start" });
+      $("#pcancel").onclick = () => { f.innerHTML = ""; };
+      if (!edit) {
+        const q = $("#pq"), sug = $("#psug"); let tm, seq = 0;
+        const search = () => {
+          clearTimeout(tm); pick = null;
+          const v = q.value.trim(); if (!v) { sug.innerHTML = ""; return; }
+          tm = setTimeout(async () => {
+            const my = ++seq;
+            try {
+              const d = await api("/api/search?q=" + encodeURIComponent(v)); if (my !== seq) return;
+              sug.innerHTML = d.results.slice(0, 5).map((x) => `<button class="row sugg" data-t="${esc(x.t)}" data-n="${esc(x.namn)}"><div class="main"><b>${esc(x.t)}</b><span>${esc(x.namn)}${x.börs ? " · " + esc(x.börs) : ""}</span></div></button>`).join("");
+            } catch (e) { sug.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; }
+          }, 300);
+        };
+        q.addEventListener("input", search);
+        sug.onclick = async (e) => {
+          const b = e.target.closest("button[data-t]"); if (!b) return;
+          pick = { t: b.dataset.t, namn: b.dataset.n }; q.value = `${pick.t} – ${pick.namn}`; sug.innerHTML = "";
+          if (!$("#pgav").value) { try { const s = await api("/api/signal?t=" + encodeURIComponent(pick.t)); if (s.pris && !$("#pgav").value) $("#pgav").placeholder = `Kurs nu: ${num(s.pris)}`; sigs[s.t] = s; } catch {} }
+          $("#pantal").focus();
+        };
+        if (t0) { pick = { t: t0, namn: t0 }; api("/api/signal?t=" + encodeURIComponent(t0)).then((s) => { pick.namn = s.namn; q.value = `${s.t} – ${s.namn}`; sigs[s.t] = s; $("#pgav").placeholder = `Kurs nu: ${num(s.pris)}`; }).catch(() => {}); }
+        else setTimeout(() => q.focus(), 300);
+      }
+      $("#psave").onclick = async () => {
+        if (!pick) { toast("Välj en aktie i listan."); return; }
+        const antal = parseFloat(String($("#pantal").value).replace(",", ".")), gav = parseFloat(String($("#pgav").value).replace(",", "."));
+        if (!(antal > 0)) { toast("Ange antal aktier."); return; }
+        if (!(gav > 0)) { toast("Ange köpkursen."); return; }
+        const b = $("#psave"); b.disabled = true;
+        try {
+          portfolio = await api("/api/portfolio", { method: "POST", body: { action: "set", t: pick.t, namn: pick.namn, antal, gav } });
+          LS.set("portCache", portfolio);
+          f.innerHTML = ""; toast(`${pick.t} sparad`);
+          await loadSignals([pick.t]);
+          renderAll();
+        } catch (e) { toast(e.message); b.disabled = false; }
+      };
+    }
+    $("#addbtn").onclick = () => showForm();
+
+    // Hämta signal för varje innehav, fyra åt gången
+    async function loadSignals(ts) {
+      const queue = ts.filter((t) => !sigs[t]);
+      const worker = async () => { while (queue.length) { const t = queue.shift(); try { sigs[t] = await api("/api/signal?t=" + encodeURIComponent(t)); } catch {} if (!gone()) renderAll(); } };
+      await Promise.all([worker(), worker(), worker(), worker()]);
+    }
+    const refresh = async () => {
+      if (document.hidden || gone() || !portfolio.length) return;
+      try {
+        const q = await api("/api/quotes?symbols=" + portfolio.map((x) => encodeURIComponent(x.t)).join(","));
+        q.quotes.forEach((x) => { if (x.pris > 0) { prices[x.t] = x.pris; if (sigs[x.t]) sigs[x.t].idag = x.idag; } });
+        if (!gone()) { renderSummary(); renderList(); }
+      } catch {}
+    };
+
+    renderAll();
+    try {
+      const [, c, a] = await Promise.all([loadPortfolio(), loadCandidates(), api("/api/portfolio/advice").catch(() => null)]);
+      if (gone()) return;
+      cands = c; advice = a;
+      renderAll();
+      if (prefill) showForm(portfolio.find((x) => x.t === prefill), portfolio.some((x) => x.t === prefill) ? null : prefill);
+      await loadSignals(portfolio.map((x) => x.t));
+      timer = setInterval(refresh, 60000);
+    } catch (e) { toast(e.message); }
+  }
+
   // ---------- Inställningar ----------
   function viewSettings() {
-    setTop("Inställningar");
+    setTop("Inställningar", "", true);
     view.innerHTML = `
       <div class="card"><h2>AI</h2>
         <label class="switch"><span>Analysera automatiskt när jag öppnar en aktie<br><span class="small muted">Varje ny analys kostar ungefär 1–2 kr. En analys sparas i 7 dagar.</span></span>

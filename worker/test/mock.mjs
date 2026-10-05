@@ -94,6 +94,18 @@ export function installMocks({ claudeMode = "ok" } = {}) {
       if (body.tool_choice && ["tool", "any"].includes(body.tool_choice.type))
         return new Response(JSON.stringify({ error: { message: 'tool_choice: type "tool" and "any" are not supported for this model.' } }), { status: 400 });
       const names = body.tools.map((t) => t.name);
+      if (names.includes("submit_advice")) {
+        for (const k of Object.keys(body.tools[0].input_schema.properties)) if (!/^[a-zA-Z0-9_.-]{1,64}$/.test(k)) throw new Error("Ogiltigt fältnamn " + k);
+        globalThis.lastAdvicePrompt = body.messages[0].content;
+        if (claudeMode === "textfirst" && body.messages.length === 1) return ok({ stop_reason: "end_turn", content: [{ type: "text", text: "Jag tittar på portföljen." }] });
+        return ok({ stop_reason: "tool_use", content: [{ type: "tool_use", id: "a1", name: "submit_advice", input: {
+          sammanfattning: "Portföljen är koncentrerad till en aktie.", forvantad_fore: 0.07, forvantad_efter: 0.11,
+          innehav: [{ ticker: "NVDA", rad: "Behåll", kort: "Fortsatt stark.", motivering: "Hög tillväxt." },
+            { ticker: "MU", rad: "Sälj", kort: "Bättre alternativ finns.", motivering: "Låg förväntad avkastning.",
+              alternativ: [{ ticker: "MSFT", varfor: "Högre förväntad avkastning." }, { ticker: "FAKE", varfor: "Finns inte i listan." }, { ticker: "NVDA", varfor: "Äger redan." }] },
+            { ticker: "ZZZZ", rad: "Köp mer", kort: "Äger inte.", motivering: "x" }],
+          att_tanka_pa: ["Sprid riskerna."] } }] });
+      }
       if (!names.includes("web_search") || !names.includes("submit_verdict")) throw new Error("tools saknas");
       for (const k of Object.keys(body.tools[1].input_schema.properties)) if (!/^[a-zA-Z0-9_.-]{1,64}$/.test(k)) throw new Error("Ogiltigt fältnamn " + k);
       const turn = body.messages.length;

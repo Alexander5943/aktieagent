@@ -209,3 +209,19 @@ ul.pts{margin:4px 0;padding-left:20px} ul.pts li{margin:3px 0}
 .frow .sc b{display:block;font-size:20px;line-height:1.1}
 .frow .sc span{font-size:11px;color:var(--muted)}
 .tabs a span{white-space:nowrap}
+
+/* Portfölj */
+#topaction{display:flex;gap:8px;align-items:center}
+.iconbtn{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:50%;background:var(--soft);color:var(--text)}
+.iconbtn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+.pill.neutral{background:var(--soft);color:var(--text);box-shadow:inset 0 0 0 1px var(--line)}
+details.hold{border-top:1px solid var(--line)}
+details.hold:first-of-type{border-top:0}
+details.hold > summary{list-style:none;cursor:pointer;border-top:0}
+details.hold > summary::-webkit-details-marker{display:none}
+details.hold[open] > summary{padding-bottom:6px}
+.holdbody{padding:0 0 12px}
+.row .main span{white-space:nowrap}
+.btnrow{display:flex;gap:8px;margin-top:12px}
+.btnrow .btn{flex:1;padding:10px 8px;font-size:14px;text-decoration:none;min-height:44px}
+button.row.sugg{width:100%;border:0;background:none;text-align:left;cursor:pointer;font:inherit;color:inherit}

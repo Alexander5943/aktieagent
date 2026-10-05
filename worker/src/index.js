@@ -42,6 +42,11 @@ export default {
       if (p === "/api/ai" && req.method === "POST") return json(await runAI(ticker(url), env, ctx, url.searchParams.get("force") === "1"));
       if (p === "/api/watchlist" && req.method === "GET") return json(await getWatchlist(env));
       if (p === "/api/watchlist" && req.method === "POST") return json(await editWatchlist(await req.json(), env));
+      if (p === "/api/portfolio" && req.method === "GET") return json(await getPortfolio(env));
+      if (p === "/api/portfolio" && req.method === "POST") return json(await editPortfolio(await req.json(), env));
+      if (p === "/api/signal") return json(await signal(ticker(url), env, ctx));
+      if (p === "/api/portfolio/advice" && req.method === "GET") return json((await env.AKTIE_KV.get("portfolio:advice", "json")) || { saknas: true });
+      if (p === "/api/portfolio/advice" && req.method === "POST") return json(await portfolioAdvice(await req.json(), env));
       return json({ error: "Okänd adress." }, 404);
     } catch (e) {
       return json({ error: e.message || String(e) }, e.status || 500);
@@ -385,6 +390,29 @@ const VERDICT_TOOL = {
   },
 };
 
+// Dagsgräns så att krediterna inte tar slut av misstag
+async function countAI(env, fromCron = false) {
+  const day = new Date().toISOString().slice(0, 10);
+  const limit = Number(env.AI_DAILY_LIMIT || DEFAULT_AI_DAILY_LIMIT);
+  const used = Number((await env.AKTIE_KV.get("aicount:" + day)) || 0);
+  if (used >= limit && !fromCron) throw httpError(`Dagens gräns på ${limit} AI-analyser är nådd. Försök i morgon.`, 429);
+  await env.AKTIE_KV.put("aicount:" + day, String(used + 1), { expirationTtl: 3 * 86400 });
+}
+
+async function claude(env, body) {
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const res = await r.json();
+  if (!r.ok) {
+    const msg = (res.error && res.error.message) || `Claude svarade ${r.status}`;
+    throw httpError(/credit|balance/i.test(msg) ? "Krediterna är slut. Fyll på i console.anthropic.com." : msg, 502);
+  }
+  return res;
+}
+
 async function getAI(t, env) {
   return (await env.AKTIE_KV.get("ai:" + t, "json")) || { saknas: true };
 }
@@ -396,12 +424,7 @@ async function runAI(t, env, ctx, force = false, fromCron = false) {
   }
   if (!env.ANTHROPIC_API_KEY) throw httpError("ANTHROPIC_API_KEY saknas på servern.", 500);
 
-  // Dagsgräns så att krediterna inte tar slut av misstag
-  const day = new Date().toISOString().slice(0, 10);
-  const limit = Number(env.AI_DAILY_LIMIT || DEFAULT_AI_DAILY_LIMIT);
-  const used = Number((await env.AKTIE_KV.get("aicount:" + day)) || 0);
-  if (used >= limit && !fromCron) throw httpError(`Dagens gräns på ${limit} AI-analyser är nådd. Försök i morgon.`, 429);
-  await env.AKTIE_KV.put("aicount:" + day, String(used + 1), { expirationTtl: 3 * 86400 });
+  await countAI(env, fromCron);
 
   const s = await stock(t, env, ctx);
   // Skicka inte stora tabeller till AI:n (kostar bara pengar)
@@ -418,16 +441,7 @@ async function runAI(t, env, ctx, force = false, fromCron = false) {
 
   for (let round = 0; round < 5; round++) {
     const body = { model: MODEL, max_tokens: 6000, system: SYSTEM, tools, messages };
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const res = await r.json();
-    if (!r.ok) {
-      const msg = (res.error && res.error.message) || `Claude svarade ${r.status}`;
-      throw httpError(/credit|balance/i.test(msg) ? "Krediterna är slut. Fyll på i console.anthropic.com." : msg, 502);
-    }
+    const res = await claude(env, body);
     for (const b of res.content) {
       if (b.type === "web_search_tool_result" && Array.isArray(b.content)) {
         for (const x of b.content) if (x.url && !sources.has(x.url)) sources.set(x.url, { titel: x.title, länk: x.url, datum: x.page_age || null });
@@ -475,5 +489,154 @@ async function editWatchlist(body, env) {
   return list;
 }
 
+// ---------------------------------------------------------------------------
+// Portfölj: dina innehav, en kort signal per aktie och AI-råd för hela portföljen
+// ---------------------------------------------------------------------------
+
+const cleanT = (x) => { const t = String(x || "").trim().toUpperCase(); if (!/^[A-Z0-9.\-^=]{1,15}$/.test(t)) throw httpError("Ogiltig ticker.", 400); return t; };
+const fnum = (x) => { const v = Number(x); return isFinite(v) ? v : null; };
+const str = (x, n) => (x == null ? "" : String(x).slice(0, n));
+
+async function getPortfolio(env) {
+  return (await env.AKTIE_KV.get("portfolio", "json")) || [];
+}
+
+async function editPortfolio(body, env) {
+  let list = await getPortfolio(env);
+  const t = cleanT(body.t);
+  if (body.action === "set") {
+    const antal = fnum(body.antal), gav = fnum(body.gav);
+    if (!(antal > 0 && antal < 1e9)) throw httpError("Ange hur många aktier du äger.", 400);
+    if (!(gav > 0 && gav < 1e7)) throw httpError("Ange vad du betalade per aktie.", 400);
+    const row = { t, namn: str(body.namn || t, 80), antal, gav, ändrad: Date.now() };
+    const i = list.findIndex((x) => x.t === t);
+    if (i >= 0) list[i] = { ...list[i], ...row }; else list.push({ ...row, tillagd: Date.now() });
+  }
+  if (body.action === "remove") list = list.filter((x) => x.t !== t);
+  if (list.length > 40) throw httpError("Max 40 innehav.", 400);
+  await env.AKTIE_KV.put("portfolio", JSON.stringify(list));
+  return list;
+}
+
+/** Det viktigaste om en aktie, litet nog för att hämta för hela portföljen. */
+async function signal(t, env, ctx) {
+  const s = await stock(t, env, ctx);
+  const ai = await env.AKTIE_KV.get("ai:" + t, "json");
+  const f = s.nyckeltal || {}, h = s.horisonter;
+  return {
+    t, namn: s.namn, pris: s.pris, valuta: s.valuta, idag: s.idag, sektor: f.sektor || null,
+    poäng: s.poäng.total, bedömning: s.poäng.bedömning,
+    horisonter: h ? Object.fromEntries(h.rader.map((r) => [r.år, { årlig: r.årlig, kurs: r.kurs }])) : {},
+    utdelning: h ? h.utdelning : null, förlustbolag: h ? h.förlustbolag : null,
+    värdering: s.värdering ? { läge: s.värdering.läge, gap: s.värdering.gap, rimligt: s.värdering.rimligt } : null,
+    hype: s.hype ? { poäng: s.hype.poäng, nivå: s.hype.nivå } : null,
+    analytiker: { riktkurs: f.riktkurs ?? null, antal: f.antal_analytiker ?? null, råd: f.analytiker_råd ?? null },
+    förändring_1år: s.teknik.förändring_1år, volatilitet: s.teknik.volatilitet,
+    ai: ai ? { betyg: ai.betyg, kort: ai.kort, värderingsläge: ai.värderingsläge || null, analyserad: ai.analyserad } : null,
+  };
+}
+
+const ADVICE_SYSTEM = `Du är en ärlig och noggrann rådgivare för en privatperson. Du skriver på svenska, i korta och enkla meningar.
+Du får personens aktieinnehav: antal, köpkurs, dagens kurs, vinst eller förlust, andel av portföljen och analysdata per aktie
+(förväntad avkastning per år om 1, 3, 5 och 10 år från en räknad modell, värderingsläge, hype 0–100, kvalitetspoäng 0–100, analytiker och en tidigare AI-bedömning om sådan finns).
+Du får också kandidater: aktier från appens topplistor med förväntad avkastning.
+
+Målet är högsta möjliga avkastning per år på 3–5 års sikt, till en rimlig risk.
+- För varje innehav: välj Köp mer, Behåll, Sälj delvis eller Sälj. Motivera kort med siffrorna.
+- Köpkursen avgör inte vad som är klokt framåt. Det som spelar roll är vad aktien väntas ge härifrån jämfört med alternativen.
+- Vid Sälj eller Sälj delvis: föreslå 1–3 alternativ ENBART ur kandidatlistan, som väntas ge mer per år. Välj gärna en annan sektor om portföljen är koncentrerad.
+- Ett innehav som är över 30 % av portföljen är en risk i sig.
+- Var försiktig: en modell kan ha fel, särskilt för förlustbolag och aktier med hög hype. Säg när underlaget är tunt.
+- Hitta aldrig på siffror eller aktier. Detta är underlag för egna beslut, inte finansiell rådgivning.
+Avsluta genom att anropa verktyget submit_advice.`;
+
+const RAD = ["Köp mer", "Behåll", "Sälj delvis", "Sälj"];
+const ADVICE_TOOL = {
+  name: "submit_advice",
+  description: "Lämna råden för portföljen. Anropas sist.",
+  input_schema: {
+    type: "object",
+    properties: {
+      sammanfattning: { type: "string", description: "Portföljen i 2–4 korta meningar: styrkor, risker, viktigaste ändringen." },
+      forvantad_fore: { type: "number", description: "Ungefärlig förväntad avkastning per år för portföljen som den är, som decimal (0.08 = 8 %)." },
+      forvantad_efter: { type: "number", description: "Ungefärlig förväntad avkastning per år om råden följs, som decimal." },
+      innehav: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            ticker: { type: "string" },
+            rad: { type: "string", enum: RAD },
+            kort: { type: "string", description: "Rådet i en kort mening." },
+            motivering: { type: "string", description: "2–3 korta meningar med siffrorna som avgör." },
+            alternativ: {
+              type: "array", description: "Endast vid Sälj eller Sälj delvis. 1–3 aktier ur kandidatlistan.",
+              items: { type: "object", properties: { ticker: { type: "string" }, varfor: { type: "string" } }, required: ["ticker", "varfor"] },
+            },
+          },
+          required: ["ticker", "rad", "kort", "motivering"],
+        },
+      },
+      att_tanka_pa: { type: "array", items: { type: "string" }, description: "2–4 korta punkter, t.ex. spridning, risk, courtage." },
+    },
+    required: ["sammanfattning", "innehav"],
+  },
+};
+
+const portfolioKey = (list) => list.map((x) => `${x.t}:${x.antal}`).sort().join(",");
+
+async function portfolioAdvice(body, env) {
+  if (!env.ANTHROPIC_API_KEY) throw httpError("ANTHROPIC_API_KEY saknas på servern.", 500);
+  const list = await getPortfolio(env);
+  if (!list.length) throw httpError("Lägg till dina innehav först.", 400);
+  // Appen skickar med signalerna den redan hämtat (så slipper servern hämta allt igen). Rensa och begränsa.
+  const sig = new Map((Array.isArray(body.signaler) ? body.signaler : []).slice(0, 40).map((x) => [String(x.t || "").toUpperCase(), x]));
+  const owned = new Set(list.map((x) => x.t));
+  const total = list.reduce((s, x) => s + x.antal * (fnum((sig.get(x.t) || {}).pris) || x.gav), 0);
+  const innehav = list.map((x) => {
+    const g = sig.get(x.t) || {}, pris = fnum(g.pris) || x.gav;
+    const h = g.horisonter || {}, a = (k) => fnum(h[k] && h[k].årlig);
+    return {
+      ticker: x.t, namn: str(x.namn, 80), antal: x.antal, köpkurs: x.gav, kurs: pris, vinst: pris / x.gav - 1, andel: total ? (x.antal * pris) / total : null,
+      sektor: str(g.sektor, 40), förväntad_per_år: { "1": a(1), "3": a(3), "5": a(5), "10": a(10) },
+      värdering: g.värdering ? { läge: str(g.värdering.läge, 30), gap: fnum(g.värdering.gap) } : null,
+      hype: g.hype ? fnum(g.hype.poäng) : null, kvalitet: fnum(g.poäng), förlustbolag: !!g.förlustbolag,
+      analytiker: g.analytiker ? { riktkurs: fnum(g.analytiker.riktkurs), antal: fnum(g.analytiker.antal) } : null,
+      tidigare_ai: g.ai ? { betyg: str(g.ai.betyg, 30), kort: str(g.ai.kort, 300) } : null,
+    };
+  });
+  const kandidater = (Array.isArray(body.kandidater) ? body.kandidater : []).slice(0, 60)
+    .map((k) => ({ ticker: str(k.t, 15).toUpperCase(), namn: str(k.namn, 60), sektor: str(k.sektor, 40), lista: str(k.lista, 20),
+      per_år_3år: fnum(k.årlig_3år), per_år_10år: fnum(k.årlig_10år), förväntad_1år: fnum(k.förväntad), kvalitet: fnum(k.kvalitet), ai: str(k.ai, 30) }))
+    .filter((k) => /^[A-Z0-9.\-]{1,15}$/.test(k.ticker) && !owned.has(k.ticker));
+  const candSet = new Set(kandidater.map((k) => k.ticker));
+
+  await countAI(env);
+  const messages = [{ role: "user", content: `Dagens datum: ${new Date().toISOString().slice(0, 10)}.\n\nMina innehav:\n${JSON.stringify(innehav)}\n\nKandidater:\n${JSON.stringify(kandidater)}` }];
+  for (let round = 0; round < 3; round++) {
+    const res = await claude(env, { model: MODEL, max_tokens: 6000, system: ADVICE_SYSTEM, tools: [ADVICE_TOOL], messages });
+    const v = res.content.find((b) => b.type === "tool_use" && b.name === "submit_advice");
+    if (v) {
+      const i = v.input || {};
+      const rows = (Array.isArray(i.innehav) ? i.innehav : []).map((r) => ({
+        t: str(r.ticker, 15).toUpperCase(), råd: RAD.includes(r.rad) ? r.rad : "Behåll", kort: str(r.kort, 300), motivering: str(r.motivering, 900),
+        alternativ: (Array.isArray(r.alternativ) ? r.alternativ : []).map((a) => ({ t: str(a.ticker, 15).toUpperCase(), varför: str(a.varfor, 400) }))
+          .filter((a) => candSet.has(a.t)).slice(0, 3), // bara aktier som faktiskt fanns i listan
+      })).filter((r) => owned.has(r.t));
+      const out = {
+        sammanfattning: str(i.sammanfattning, 1200), före: fnum(i.forvantad_fore), efter: fnum(i.forvantad_efter),
+        innehav: rows, att_tänka_på: (Array.isArray(i.att_tanka_pa) ? i.att_tanka_pa : []).map((x) => str(x, 300)).slice(0, 5),
+        kandidater: kandidater.filter((k) => rows.some((r) => r.alternativ.some((a) => a.t === k.ticker))),
+        portfölj: portfolioKey(list), modell: MODEL, skapad: Date.now(),
+      };
+      await env.AKTIE_KV.put("portfolio:advice", JSON.stringify(out));
+      return out;
+    }
+    messages.push({ role: "assistant", content: res.content });
+    messages.push({ role: "user", content: "Avsluta nu genom att anropa submit_advice." });
+  }
+  throw httpError("AI:n gav inget svar. Försök igen.", 502);
+}
+
 // Exporteras för tester
-export const _test = { fundamentals, technicals, score, expectedReturn, editWatchlist, runAI, stock, search, macroSeries };
+export const _test = { fundamentals, technicals, score, expectedReturn, editWatchlist, runAI, stock, search, macroSeries, portfolioKey };
