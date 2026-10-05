@@ -208,6 +208,8 @@ def candidates(demo: bool, workers: int = 8) -> tuple[list[dict], int]:
             if r:
                 rows.append(r)
     print(f"\nSteg 2: {len(rows)} olönsamma bolag med börsvärde över 300 mn USD")
+    if S.INFO_FEL:
+        info_note(f"Yahoo svarade inte för {len(S.INFO_FEL)} av {len(hists)} aktier")
     return rows, len(tickers)
 
 
@@ -297,10 +299,12 @@ def ai_scores(rows: list[dict]) -> dict:
         msg = f"Dagens datum: {date.today().isoformat()}. Bedöm dessa {len(chunk)} bolag:\n" + json.dumps([ai_input(r) for r in chunk], ensure_ascii=False)
         for attempt in range(2):
             try:
-                resp = client.messages.create(model=MODEL, max_tokens=8000, system=SYSTEM, tools=[SCORES_TOOL],
-                                              tool_choice={"type": "tool", "name": "submit_scores"},
-                                              messages=[{"role": "user", "content": msg}])
-                block = next(b for b in resp.content if b.type == "tool_use")
+                # Modellen tillåter inte tvingat verktygsval, så vi ber om det i texten och försöker igen om det uteblir
+                resp = client.messages.create(model=MODEL, max_tokens=12000, system=SYSTEM, tools=[SCORES_TOOL],
+                                              messages=[{"role": "user", "content": msg + "\n\nSvara genom att anropa submit_scores med alla bolagen."}])
+                block = next((b for b in resp.content if b.type == "tool_use"), None)
+                if block is None:
+                    raise RuntimeError("AI:n anropade inte submit_scores")
                 for s in block.input.get("bolag", []):
                     out[str(s.get("ticker", "")).upper()] = s
                 break

@@ -418,7 +418,6 @@ async function runAI(t, env, ctx, force = false, fromCron = false) {
 
   for (let round = 0; round < 5; round++) {
     const body = { model: MODEL, max_tokens: 6000, system: SYSTEM, tools, messages };
-    if (round === 4) body.tool_choice = { type: "tool", name: "submit_verdict" };
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },

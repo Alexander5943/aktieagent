@@ -112,6 +112,9 @@ def batch_history(tickers: list[str], demo: bool) -> dict[str, pd.DataFrame]:
     return out
 
 
+INFO_FEL = []  # tickers där Yahoo inte svarade
+
+
 def get_info(ticker: str, demo: bool) -> dict:
     """Nyckeltal för en aktie. Sparas i cache så att en ny körning samma dag går snabbt."""
     if demo:
@@ -130,6 +133,7 @@ def get_info(ticker: str, demo: bool) -> dict:
             return info
         except Exception:
             time.sleep(2 * (attempt + 1))  # Yahoo begränsar ibland; vänta och försök igen
+    INFO_FEL.append(ticker)
     return {}
 
 

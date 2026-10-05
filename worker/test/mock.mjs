@@ -90,6 +90,9 @@ export function installMocks({ claudeMode = "ok" } = {}) {
       const body = JSON.parse(init.body);
       if (!init.headers["x-api-key"]) return new Response(JSON.stringify({ error: { message: "no key" } }), { status: 401 });
       if (claudeMode === "nocredit") return new Response(JSON.stringify({ error: { message: "Your credit balance is too low" } }), { status: 400 });
+      // Som riktiga claude-opus-5-5: tvingat verktygsval stöds inte
+      if (body.tool_choice && ["tool", "any"].includes(body.tool_choice.type))
+        return new Response(JSON.stringify({ error: { message: 'tool_choice: type "tool" and "any" are not supported for this model.' } }), { status: 400 });
       const names = body.tools.map((t) => t.name);
       if (!names.includes("web_search") || !names.includes("submit_verdict")) throw new Error("tools saknas");
       for (const k of Object.keys(body.tools[1].input_schema.properties)) if (!/^[a-zA-Z0-9_.-]{1,64}$/.test(k)) throw new Error("Ogiltigt fältnamn " + k);

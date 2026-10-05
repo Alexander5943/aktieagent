@@ -47,7 +47,7 @@ class FakeMessages:
     def create(self, **kw):
         calls.append(kw)
         import json
-        rows = json.loads(kw["messages"][0]["content"].split("\n", 1)[1])
+        rows = json.loads(kw["messages"][0]["content"].split("\n", 1)[1].split("\n\n")[0])
         bolag = [{"ticker": r["ticker"].lower(), "tema": "Energi", "problem": "Ren energi", "ide": "Små reaktorer.", "malsattning": "Första reaktorn 2028.",
                   "risk": "Tillstånd.", "problem_poang": 9, "ide_poang": 8 if r["ticker"] == "FUSN" else 4, "malmedveten_poang": 7} for r in rows]
         return types.SimpleNamespace(content=[types.SimpleNamespace(type="tool_use", input={"bolag": bolag})])
@@ -57,7 +57,7 @@ sys.modules["anthropic"] = types.SimpleNamespace(Anthropic=lambda: types.SimpleN
 others = [F.facts(f"X{i}", {**base, "longName": f"Other {i}", "longBusinessSummary": "Sells software."}, {}) for i in range(25)]
 cands = F.preselect([f] + others)
 sc = F.ai_scores(cands)
-check("AI anropas i grupper om 20", len(calls) == 2 and calls[0]["tool_choice"]["name"] == "submit_scores")
+check("AI anropas i grupper om 20", len(calls) == 2 and "tool_choice" not in calls[0] and calls[0]["tools"][0]["name"] == "submit_scores")
 check("svar mappas till ticker (versaler)", "FUSN" in sc and len(sc) == 26)
 top = F.rank(cands, sc)
 check("bäst idé hamnar först", top[0]["ticker"] == "FUSN" and top[0]["poäng"] > top[1]["poäng"])
