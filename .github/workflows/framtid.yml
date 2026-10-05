@@ -1,0 +1,47 @@
+name: Framtidsaktier
+
+# Topp 50 olönsamma bolag med bäst idéer för framtidens problem.
+# Var 3:e månad: 2 januari, 2 april, 2 juli och 2 oktober (och när du startar den manuellt).
+# AI-delen kostar ungefär 10 kr per körning.
+on:
+  schedule:
+    - cron: "0 6 2 1,4,7,10 *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: framtid
+
+jobs:
+  framtid:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installera paket
+        run: pip install -r requirements.txt
+
+      - name: Testa
+        run: python test_framtid.py
+
+      - name: Ta fram framtidsaktierna
+        run: python framtid.py
+
+      - name: Spara
+        run: |
+          git config user.name "aktieagent"
+          git config user.email "aktieagent@users.noreply.github.com"
+          git add docs/data/framtid.json
+          git diff --cached --quiet || git commit -m "Framtidsaktier $(date +%Y-%m-%d)"
+          git pull --rebase origin main
+          git push

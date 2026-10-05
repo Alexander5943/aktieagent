@@ -192,3 +192,20 @@ ul.pts{margin:4px 0;padding-left:20px} ul.pts li{margin:3px 0}
 [data-tip]:hover,[data-tip]:focus{filter:brightness(1.08)}
 [id^="sec-"]{scroll-margin-top:110px}
 .row .main span + span{font-size:12px}
+
+/* Framtidsaktier */
+.frow{display:grid;grid-template-columns:30px 1fr auto;gap:10px;padding:14px 0;border-top:1px solid var(--line);color:inherit;text-decoration:none;align-items:start}
+.frow:first-child{border-top:0}
+.frow .rk{display:flex;flex-direction:column;align-items:center;gap:4px;font-variant-numeric:tabular-nums;padding-top:1px}
+.frow .rk b{font-size:16px}
+.frow .rk .pill{font-size:10px;padding:2px 6px}
+.frow .t{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.frow .t b{font-size:16px}
+.frow .t .chip{font-size:11px;padding:2px 8px}
+.frow .nm{display:block;font-size:13px;color:var(--muted);margin-top:1px}
+.frow p{margin:6px 0 0;font-size:14px;line-height:1.4}
+.frow p.muted{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:13px}
+.frow .sc{text-align:right;font-variant-numeric:tabular-nums}
+.frow .sc b{display:block;font-size:20px;line-height:1.1}
+.frow .sc span{font-size:11px;color:var(--muted)}
+.tabs a span{white-space:nowrap}

@@ -94,6 +94,7 @@
     if (page !== "aktie") LS.set("lastTab", page);
     if (page === "sok") return viewSearch();
     if (page === "topp") return viewTop();
+    if (page === "framtid") return viewFuture();
     if (page === "installningar") return viewSettings();
     if (page === "aktie" && arg) return viewStock(decodeURIComponent(arg).toUpperCase());
     return viewWatch();
@@ -361,6 +362,7 @@
     const host = (u) => String(u || "").replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "");
     const maxA = ä && ä.största.length ? Math.max(...ä.största.map((o) => o.andel || 0)) : 1;
     return `<div class="card" id="sec-bolag"><h2>Bolaget</h2>
+      <div id="framtidbox"></div>
       <div id="aibolag">${aiBolag(null)}</div>
       ${f.beskrivning ? `<details><summary>Bolagets egen beskrivning</summary><p class="desc" lang="en">${esc(f.beskrivning)}</p></details>` : ""}
       <h3>Fakta</h3>
@@ -554,6 +556,7 @@
         `<a href="${safeUrl(n.länk)}" target="_blank" rel="noopener">${esc(n.titel)}<span>${esc(n.källa || "")}${n.tid ? " · " + esc(ago(n.tid * 1000)) : ""}</span></a>`).join("")}</div>` : ""}
       <p class="disclaimer">Underlag för egen analys – inte finansiell rådgivning. Data: Yahoo Finance.</p>`;
 
+    framtidBox(t);
     $("#jump").onclick = (e) => { const b = e.target.closest("button"); const el = b && document.getElementById(b.dataset.sec); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
 
     // Stjärna
@@ -748,6 +751,64 @@
     };
     $("#seg").onclick = (e) => { const b = e.target.closest("button"); if (b) show(b.dataset.k); };
     show(tab);
+  }
+
+  // ---------- Framtidsaktier ----------
+  let framtidP = null;
+  const loadFramtid = () => (framtidP = framtidP || fetch("data/framtid.json?" + Date.now()).then((r) => { if (!r.ok) throw new Error(); return r.json(); }).catch((e) => { framtidP = null; throw e; }));
+  const fmtDay = (iso) => { const d = new Date(iso + "T00:00:00Z"); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}`; };
+  const change = (r) => r.förra == null ? `<span class="pill ghost">Ny</span>` : r.förra > r.rank ? `<span class="tiny up">▲ ${r.förra - r.rank}</span>`
+    : r.förra < r.rank ? `<span class="tiny down">▼ ${r.rank - r.förra}</span>` : "";
+  const delBars = (delar) => Object.entries(delar).map(([k, v]) => `<div class="bar"><span>${esc(k)}</span><div class="track"><div class="fill" style="width:${(v || 0) * 10}%"></div></div><b>${num(v, k === "Genomförande" ? 1 : 0)}</b></div>`).join("");
+
+  async function viewFuture() {
+    setTop("Framtidsaktier");
+    view.innerHTML = `<div class="card"><div class="skeleton" style="height:240px"></div></div>`;
+    let d;
+    try { d = await loadFramtid(); }
+    catch { view.innerHTML = `<div class="card empty"><p><b>Ingen lista än</b></p><p class="small">Listan skapas var 3:e månad (2 januari, april, juli och oktober).</p></div>`; return; }
+    if (location.hash.replace(/^#\/?/, "") !== "framtid") return;
+    const counts = {}; d.rader.forEach((r) => (counts[r.tema] = (counts[r.tema] || 0) + 1));
+    const teman = ["Alla", ...Object.keys(counts).sort((a, b) => counts[b] - counts[a])];
+    let tema = LS.get("framtidTema", "Alla"); if (!teman.includes(tema)) tema = "Alla";
+    const render = () => {
+      const rows = d.rader.filter((r) => tema === "Alla" || r.tema === tema);
+      view.innerHTML = `
+        <div class="card"><h2>Morgondagens idéer</h2>
+          <p class="small" style="margin:0 0 6px">Bolag som ännu inte går med vinst, men som har idéer som löser framtidens problem och en tydlig plan för att nå dit.</p>
+          <p class="tiny muted" style="margin:0">Uppdaterad ${esc(fmtDay(d.uppdaterad))} · nästa ${esc(fmtDay(d.nästa))} · ${esc(d.olönsamma)} olönsamma bolag gicks igenom</p>
+          <details><summary>Så rangordnas listan</summary>
+            <p class="small">Poängen 0–100 väger ihop fyra delar:</p>
+            <ul class="pts small"><li><b>Idé 35 %:</b> hur bra, unik och svår att kopiera lösningen är.</li>
+              <li><b>Framtidsproblem 25 %:</b> hur stort och växande problemet är.</li>
+              <li><b>Målmedvetenhet 20 %:</b> tydlig plan, fokus och milstolpar som nåtts.</li>
+              <li><b>Genomförande 20 %:</b> räknas ur siffrorna – tillväxt, hur länge kassan räcker, bruttomarginal, hur mycket ledningen äger och analytikernas prognos.</li></ul>
+            <p class="small muted">De tre första bedöms av AI utifrån bolagens beskrivning och siffror. Bolag mindre än 300 mn USD, banker, fastighetsbolag och SPAC-bolag är inte med.</p>
+          </details></div>
+        <nav class="jump" style="position:static" aria-label="Tema">${teman.map((t) => `<button data-t="${esc(t)}" style="${t === tema ? "background:var(--text);color:var(--bg);border-color:var(--text)" : ""}">${esc(t)}${t === "Alla" ? "" : ` · ${counts[t]}`}</button>`).join("")}</nav>
+        <div class="card">${rows.map((r) => `<a class="frow" href="#/aktie/${encodeURIComponent(r.ticker)}">
+            <div class="rk"><b>${r.rank}</b>${change(r)}</div>
+            <div class="main"><div class="t"><b>${esc(r.ticker)}</b><span class="chip">${esc(r.tema)}</span></div>
+              <span class="nm">${esc(r.namn)}</span>
+              <p><b>Löser:</b> ${esc(r.problem)}</p><p class="muted">${esc(r.idé)}</p></div>
+            <div class="sc"><b>${r.poäng}</b><span>/100</span></div></a>`).join("")}</div>
+        <p class="disclaimer">Bolag utan vinst är riskabla. De kan behöva ta in nya pengar (nyemission) eller misslyckas helt. Sprid riskerna. Inte finansiell rådgivning.</p>`;
+      $(".jump", view).onclick = (e) => { const b = e.target.closest("button"); if (!b) return; tema = b.dataset.t; LS.set("framtidTema", tema); render(); };
+    };
+    render();
+  }
+
+  // På aktiesidan: visa om aktien finns bland framtidsaktierna
+  async function framtidBox(t) {
+    try {
+      const d = await loadFramtid(), r = d.rader.find((x) => x.ticker === t), el = $("#framtidbox");
+      if (!r || !el) return;
+      el.innerHTML = `<div class="callout"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <b>Framtidsaktie #${r.rank} av ${d.rader.length}</b><span class="pill ghost">${esc(r.tema)} · ${r.poäng}/100</span></div>
+        <p style="margin:8px 0 4px"><b>Löser:</b> ${esc(r.problem)}</p><p style="margin:4px 0">${esc(r.idé)}</p>
+        ${r.mål ? `<p style="margin:4px 0"><b>Mål:</b> ${esc(r.mål)}</p>` : ""}${r.risk ? `<p style="margin:4px 0"><b>Största risk:</b> ${esc(r.risk)}</p>` : ""}
+        <details><summary>Poängen</summary>${delBars(r.delar)}</details></div>`;
+    } catch { /* ingen lista än */ }
   }
 
   // ---------- Inställningar ----------

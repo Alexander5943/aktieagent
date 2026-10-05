@@ -12,6 +12,7 @@ En privat aktieapp för mobilen. Du kan:
 - **Bevaka egna aktier.** Tryck på stjärnan. AI-analysen uppdateras automatiskt varje måndag.
 - **Topplistor** för tre tidshorisonter: 1–6 månader, 1–3 år och 5–10 år (S&P 500, den 1:a varje månad).
 - **Nya börsnoteringar** i USA det senaste året, uppdaterad varje vardagskväll.
+- **Framtidsaktier**: topp 50 bolag som ännu inte är lönsamma men har bäst idéer för framtidens problem och en tydlig plan. AI bedömer idéerna. Uppdateras var 3:e månad.
 
 Underlag för egen analys – inte finansiell rådgivning.
 
@@ -23,6 +24,7 @@ Underlag för egen analys – inte finansiell rådgivning.
 | Servern | `worker/` → Cloudflare Workers (gratis) | Hämtar data från Yahoo Finance, kör AI, sparar bevakningslistan |
 | Topplistorna | `screener.py` + `modell.py` → GitHub Actions | Körs den 1:a varje månad |
 | Nya börsnoteringar | `ipo.py` → GitHub Actions | Körs varje vardagskväll |
+| Framtidsaktier | `framtid.py` → GitHub Actions | Körs 2 jan, apr, jul och okt (cirka 10 kr i AI) |
 
 Servern skyddas av en **app-kod** som bara du känner till. Utan den kan ingen använda servern eller dina AI-krediter, även om appens adress är offentlig.
 
@@ -56,6 +58,8 @@ node test/devserver.mjs    # appen på http://localhost:8787 med låtsasdata (ap
 cd ..
 python test_modell.py      # Python-modellen (topplistor) räknar som servern
 python ipo.py --demo       # nya börsnoteringar med testdata
+python test_framtid.py     # framtidsaktier: filter, AI-svar och rangordning
+python framtid.py --demo   # framtidsaktier med testdata, utan AI
 ```
 
 Värderingsmodellen finns på två ställen: `worker/src/analys.js` (appen) och `modell.py` (topplistorna). Ändra båda.
