@@ -62,6 +62,18 @@ def num(x):
     return A._num(x)
 
 
+GH = bool(os.environ.get("GITHUB_ACTIONS"))
+
+
+def fel(msg):
+    """Felmeddelande som syns direkt på körningens sida i GitHub."""
+    print(f"::error::{msg}" if GH else f"FEL: {msg}", flush=True)
+
+
+def info_note(msg):
+    print(f"::notice::{msg}" if GH else msg, flush=True)
+
+
 def lin(v, good, bad):
     if v is None:
         return None
@@ -249,9 +261,9 @@ SCORES_TOOL = {
                         "ide": {"type": "string", "description": "Bolagets lösning och vad som gör den unik. 1–2 enkla meningar."},
                         "malsattning": {"type": "string", "description": "Bolagets mål och nästa viktiga milstolpar, om de är kända. En mening."},
                         "risk": {"type": "string", "description": "Den största risken. En mening."},
-                        "problem_poang": {"type": "integer", "minimum": 0, "maximum": 10, "description": "Hur stort och växande framtidsproblemet är."},
-                        "ide_poang": {"type": "integer", "minimum": 0, "maximum": 10, "description": "Hur bra, unik och svår att kopiera lösningen är."},
-                        "malmedveten_poang": {"type": "integer", "minimum": 0, "maximum": 10, "description": "Tydlig plan, fokus, uppnådda milstolpar, ledning som levererar."},
+                        "problem_poang": {"type": "integer", "description": "Hur stort och växande framtidsproblemet är."},
+                        "ide_poang": {"type": "integer", "description": "Hur bra, unik och svår att kopiera lösningen är."},
+                        "malmedveten_poang": {"type": "integer", "description": "Tydlig plan, fokus, uppnådda milstolpar, ledning som levererar."},
                     },
                     "required": ["ticker", "tema", "problem", "ide", "malsattning", "risk", "problem_poang", "ide_poang", "malmedveten_poang"],
                 },
@@ -294,9 +306,12 @@ def ai_scores(rows: list[dict]) -> dict:
                 break
             except Exception as e:
                 if "credit" in str(e).lower() or "balance" in str(e).lower():
-                    print("FEL: AI-krediterna är slut. Fyll på i console.anthropic.com.")
+                    fel("AI-krediterna är slut. Fyll på i console.anthropic.com.")
                     return out
-                print(f"  fel ({e}), försöker igen" if attempt == 0 else f"  hoppar över gruppen ({e})")
+                if attempt == 0:
+                    print(f"  fel ({e}), försöker igen", flush=True)
+                else:
+                    fel(f"AI-anropet misslyckades för bolag {i + 1}–{i + len(chunk)}: {str(e)[:300]}")
     return out
 
 
@@ -349,17 +364,17 @@ def main():
 
     rows, n_universe = candidates(args.demo)
     if not rows:
-        print("FEL: Inga bolag hittades. Svarar Yahoo Finance? Den gamla listan behålls.")
+        fel("Inga bolag hittades. Svarar Yahoo Finance? Den gamla listan behålls.")
         return 1
     cand = preselect(rows)
-    print(f"Steg 3: {len(cand)} kandidater till AI-bedömningen")
+    info_note(f"{n_universe} aktier, {len(rows)} olönsamma bolag över 300 mn USD, {len(cand)} kandidater till AI")
     use_ai = not args.demo and os.environ.get("ANTHROPIC_API_KEY")
     if not args.demo and not use_ai:
-        print("FEL: ANTHROPIC_API_KEY saknas - listan kräver AI. Den gamla listan behålls.")
+        fel("ANTHROPIC_API_KEY saknas - listan kräver AI. Den gamla listan behålls.")
         return 1
     scores = ai_scores(cand) if use_ai else demo_scores(cand)
     if len(scores) < len(cand) * 0.6:
-        print(f"FEL: AI:n bedömde bara {len(scores)} av {len(cand)} bolag. Den gamla listan behålls.")
+        fel(f"AI:n bedömde bara {len(scores)} av {len(cand)} bolag. Den gamla listan behålls.")
         return 1
     top = rank(cand, scores)
 
@@ -387,7 +402,7 @@ def main():
     print(f"\nTopp 10 framtidsaktier:")
     for r in rader[:10]:
         print(f"  {r['rank']:>2}. {r['ticker']:<6} {r['poäng']:>3} p  {r['tema']:<13} {r['namn'][:34]}")
-    print(f"Skrev {len(rader)} bolag till {args.out}")
+    info_note(f"Klart: {len(rader)} framtidsaktier, AI bedömde {len(scores)} bolag. Etta: {rader[0]['ticker']} ({rader[0]['namn']})")
     return 0
 
 

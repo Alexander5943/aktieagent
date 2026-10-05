@@ -28,6 +28,13 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - name: Återanvänd dagens hämtade nyckeltal (om körningen görs om samma dag)
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache
+          key: yahoo-${{ github.run_id }}
+          restore-keys: yahoo-
+
       - name: Installera paket
         run: pip install -r requirements.txt
 
@@ -36,6 +43,13 @@ jobs:
 
       - name: Ta fram framtidsaktierna
         run: python framtid.py
+
+      - name: Spara hämtade nyckeltal till nästa körning
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache
+          key: yahoo-${{ github.run_id }}
 
       - name: Spara
         run: |
