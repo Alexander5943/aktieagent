@@ -13,7 +13,7 @@
  *   APP_KEY            din egen app-kod, så att bara du kan använda servern
  */
 
-import { horizons, valuation, hype, seasonality, macro, FACTORS } from "./analys.js";
+import { horizons, valuation, hype, seasonality, macro, ownership, FACTORS } from "./analys.js";
 
 const MODEL = "claude-opus-5-5";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
@@ -137,7 +137,7 @@ async function getCrumb(env, refresh = false) {
 }
 
 async function quoteSummary(t, env) {
-  const modules = "price,assetProfile,summaryDetail,financialData,defaultKeyStatistics,earningsTrend,calendarEvents,majorHoldersBreakdown,institutionOwnership";
+  const modules = "price,assetProfile,summaryDetail,financialData,defaultKeyStatistics,earningsTrend,calendarEvents,majorHoldersBreakdown,institutionOwnership,netSharePurchaseActivity";
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const c = await getCrumb(env, attempt > 0);
@@ -257,9 +257,13 @@ function fundamentals(qs) {
 
 function owners(qs) {
   const mh = qs.majorHoldersBreakdown || {}, io = (qs.institutionOwnership && qs.institutionOwnership.ownershipList) || [];
-  const största = io.slice(0, 8).map((o) => ({ namn: o.organization, andel: raw(o.pctHeld), värde: raw(o.value), datum: o.reportDate && o.reportDate.fmt ? o.reportDate.fmt : null }))
+  const största = io.slice(0, 10).map((o) => ({ namn: o.organization, andel: raw(o.pctHeld), värde: raw(o.value), förändring: raw(o.pctChange), datum: o.reportDate && o.reportDate.fmt ? o.reportDate.fmt : null }))
     .filter((o) => o.namn);
-  const out = { insiders: raw(mh.insidersPercentHeld), institutioner: raw(mh.institutionsPercentHeld), antal_institutioner: raw(mh.institutionsCount), största };
+  // Ledningens köp och försäljningar de senaste 6 månaderna
+  const ns = qs.netSharePurchaseActivity || {};
+  const insiderhandel = ns.netPercentInsiderShares || ns.buyInfoShares || ns.sellInfoShares ? {
+    netto: raw(ns.netPercentInsiderShares), köp: raw(ns.buyInfoCount), sälj: raw(ns.sellInfoCount), period: ns.period || "6m" } : null;
+  const out = { insiders: raw(mh.insidersPercentHeld), institutioner: raw(mh.institutionsPercentHeld), antal_institutioner: raw(mh.institutionsCount), största, insiderhandel };
   return out.insiders == null && out.institutioner == null && !största.length ? null : out;
 }
 
@@ -347,6 +351,7 @@ async function stock(t, env, ctx) {
       horisonter: safe(() => horizons(f, tech, er.förväntad)),
       värdering: safe(() => valuation(f, tech)),
       hype: safe(() => hype(f, tech)),
+      ägarbetyg: safe(() => ownership(f)),
       säsong: safe(() => seasonality(ch.rows)),
       makro: safe(() => macro(ch.rows, ms)),
       rapporter: fin, nyheter: nw, hämtad: Date.now(),
@@ -581,6 +586,7 @@ async function signal(t, env, ctx) {
     utdelning: h ? h.utdelning : null, förlustbolag: h ? h.förlustbolag : null,
     värdering: s.värdering ? { läge: s.värdering.läge, gap: s.värdering.gap, rimligt: s.värdering.rimligt } : null,
     hype: s.hype ? { poäng: s.hype.poäng, nivå: s.hype.nivå } : null,
+    ägarbetyg: s.ägarbetyg ? s.ägarbetyg.betyg : null,
     analytiker: { riktkurs: f.riktkurs ?? null, antal: f.antal_analytiker ?? null, råd: f.analytiker_råd ?? null },
     förändring_1år: s.teknik.förändring_1år, volatilitet: s.teknik.volatilitet,
     ai: ai ? { betyg: ai.betyg, kort: ai.kort, värderingsläge: ai.värderingsläge || null, analyserad: ai.analyserad } : null,

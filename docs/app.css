@@ -244,3 +244,11 @@ button.row.sugg{width:100%;border:0;background:none;text-align:left;cursor:point
 .calc div span:not(:first-child){text-align:right}
 .calc .calc-h{border-top:0;font-size:12px;color:var(--muted);padding-top:0}
 .calc .calc-s{border-top:1.5px solid var(--text);font-weight:650}
+
+/* Ägarbetyg */
+.verdict-box{border-radius:12px;padding:12px;margin:4px 0 14px;background:var(--soft);border-left:0}
+.verdict-box .verdict{justify-content:space-between;margin-bottom:2px}
+ul.pm{list-style:none;margin:4px 0;padding:0}
+ul.pm li{display:grid;grid-template-columns:18px 1fr;gap:4px;font-size:14px;margin:5px 0}
+ul.pm li span{font-weight:800;text-align:center}
+ul.pm.plus li span{color:var(--up)} ul.pm.minus li span{color:var(--down)}

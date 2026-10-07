@@ -397,17 +397,27 @@
     else if (o.ins >= 0.01) tolkning.push(["Ledningen äger en del själv.", `Insiders äger ${pct(o.ins, 0, false)} – de har en del egna pengar i bolaget.`]);
     else tolkning.push(["Ledningen äger nästan inget.", "Det är vanligt i stora bolag, men betyder att ledningen har lite egna pengar på spel."]);
     const maxA = ä.största && ä.största.length ? Math.max(...ä.största.map((x) => x.andel || 0)) : 1;
-    return `<div class="card" id="sec-agare"><h2>Vem äger aktien?</h2>
+    const b = s.ägarbetyg, BCLS = { Bra: "buy", Neutral: "neutral", Dålig: "avoid" };
+    const verdict = b ? `<div class="verdict-box ${BCLS[b.betyg]}">
+        <div class="verdict"><span class="small muted">Ägarbetyg</span><span class="pill ${BCLS[b.betyg]}" style="font-size:15px;padding:5px 14px">${esc(b.betyg)}</span></div>
+        <p class="small" style="margin:2px 0 6px">${b.betyg === "Bra" ? "Ägandet är ett gott tecken för aktien." : b.betyg === "Dålig" ? "Ägandet är ett varningstecken för aktien." : "Ägandet pekar varken tydligt uppåt eller nedåt."}</p>
+        ${b.plus.length ? `<ul class="pm plus">${b.plus.map((t) => `<li><span aria-hidden="true">+</span>${esc(t)}</li>`).join("")}</ul>` : ""}
+        ${b.minus.length ? `<ul class="pm minus">${b.minus.map((t) => `<li><span aria-hidden="true">−</span>${esc(t)}</li>`).join("")}</ul>` : ""}
+        ${!b.plus.length && !b.minus.length ? `<p class="small muted">Inga tydliga signaler åt något håll.</p>` : ""}
+      </div>` : "";
+    return `<div class="card" id="sec-agare"><h2>Vem äger aktien?</h2>${verdict}
       <div class="stack" role="img" aria-label="Institutioner ${pct(o.inst, 0, false)}, insiders ${pct(o.ins, 0, false)}, småsparare och övriga ${pct(o.små, 0, false)}">
         ${seg.filter(([, v]) => v > 0.002).map(([n, v, c]) => `<i style="flex:${v};background:${c}" data-tip="${esc(`${n}\n${pct(v, 1, false)} av aktierna`)}" tabindex="0"></i>`).join("")}</div>
       <div class="owners">${seg.map(([n, v, c, d]) => `<div><i style="background:${c}"></i><span>${n}<small>${d}</small></span><b>${pct(v, 0, false)}</b></div>`).join("")}</div>
       ${o.överRapporterat ? `<p class="tiny muted">Institutionernas andel rapporteras till över 100 % (samma aktier räknas ibland två gånger, t.ex. vid blankning). Den visas som 100 %.</p>` : ""}
       ${o.antal ? `<p class="small muted" style="margin:8px 0 0">${num(o.antal, 0)} institutioner äger aktien.</p>` : ""}
+      ${ä.insiderhandel && ä.insiderhandel.netto != null ? `<p class="small" style="margin:8px 0 0">Ledningens handel senaste halvåret: ${ä.insiderhandel.köp ?? 0} köp och ${ä.insiderhandel.sälj ?? 0} försäljningar, netto <b class="${cls(ä.insiderhandel.netto)}">${pct(ä.insiderhandel.netto, 1)}</b> av deras aktier.</p>` : ""}
       <h3>Vad betyder det?</h3>
       ${tolkning.map(([r, t]) => `<p class="small" style="margin:4px 0 8px"><b>${r}</b> ${t}</p>`).join("")}
       ${ä.största && ä.största.length ? `<details><summary>Största ägarna</summary>${ä.största.map((x) => `<div class="holder" data-tip="${esc(`${x.namn}\n${pct(x.andel, 2, false)} av aktierna${x.värde ? "\nVärde " + big(x.värde) : ""}${x.datum ? "\nRapporterat " + x.datum : ""}`)}" tabindex="0">
-          <span>${esc(x.namn)}</span><div class="track"><div class="fill" style="width:${((x.andel || 0) / maxA) * 100}%"></div></div><b>${pct(x.andel, 1, false)}</b></div>`).join("")}</details>` : ""}
-      <p class="tiny muted">Ägandet är en ledtråd, inte ett betyg. Uppgifterna kommer från bolagens och fondernas rapporter till USA:s finansinspektion och kan vara upp till 3 månader gamla.</p></div>`;
+          <span>${esc(x.namn)}</span><div class="track"><div class="fill" style="width:${((x.andel || 0) / maxA) * 100}%"></div></div><b>${pct(x.andel, 1, false)}</b></div>
+          ${x.förändring != null ? `<div class="tiny ${cls(x.förändring)}" style="margin:-4px 0 4px">${x.förändring >= 0 ? "Ökat" : "Minskat"} ${pctAbs(x.förändring, 1)} senaste kvartalet</div>` : ""}`).join("")}</details>` : ""}
+      <p class="tiny muted">Ägarbetyget är en ledtråd bland flera – väg också in värderingen och AI-bedömningen. Uppgifterna kommer från bolagens och fondernas rapporter till USA:s finansinspektion och kan vara upp till 3 månader gamla.</p></div>`;
   }
 
   // ----- Säsongsmönster -----
@@ -1017,6 +1027,7 @@
               ${x.sig ? kv("Väntat per år (1 / 3 / 10 år)", `${pct(x.r[1], 0)} / ${pct(x.r[3], 0)} / ${pct(x.r[10], 0)}`) : ""}
               ${x.sig && x.sig.värdering ? kv("Värdering", esc(x.sig.värdering.läge)) : ""}
               ${x.sig && x.sig.hype ? kv("Hype", `${x.sig.hype.poäng}/100 · ${esc(x.sig.hype.nivå)}`) : ""}
+              ${x.sig && x.sig.ägarbetyg ? kv("Ägarbetyg", esc(x.sig.ägarbetyg)) : ""}
               ${tip ? `<p class="small" style="margin:10px 0 4px"><b>Varför ${esc(tip.råd.toLowerCase())}?</b></p><ul class="pts small">${tip.skäl.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>` : ""}
               ${ai ? `<div class="callout"><b>AI-genomgången ${esc(ago(advice.skapad))}: ${esc(ai.råd)}.</b> ${esc(ai.kort)} <span class="small">${esc(ai.motivering)}</span></div>` : ""}
               ${(ai && ai.alternativ.length) || alts.length ? `<h3>Bättre att investera i istället</h3>${(ai && ai.alternativ.length ? ai.alternativ.map((a) => ({ ...(cands.find((k) => k.t === a.t) || { t: a.t }), varför: a.varför })) : alts)

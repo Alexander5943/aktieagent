@@ -313,3 +313,51 @@ export function macro(stockRows, series) {
   const tydliga = faktorer.filter((f) => f.nivå !== "Ingen tydlig koppling" && f.id !== "marknad").sort((a, b) => Math.abs(b.effekt) - Math.abs(a.effekt));
   return { faktorer, förklaringsgrad: sst ? 1 - ssr / sst : null, veckor: n, beta: (faktorer.find((f) => f.id === "marknad") || {}).koefficient ?? null, känsligast: tydliga[0] ? tydliga[0].id : null };
 }
+
+// ---------------------------------------------------------------------------
+// Ägarbetyg: är ägandet ett gott eller dåligt tecken?
+// ---------------------------------------------------------------------------
+// Varje signal ger -2..+2 poäng. Summan ≥ 2 = Bra, ≤ -2 = Dålig, annars Neutral.
+
+export function ownership(f) {
+  const ä = f && f.ägare;
+  if (!ä || ä.institutioner == null) return null;
+  const inst = clip(ä.institutioner, 0, 1), ins = clip(ä.insiders ?? 0, 0, 1 - inst), små = 1 - inst - ins;
+  const pct = (x, d = 0) => `${(x * 100).toFixed(d).replace(".", ",")} %`;
+  const plus = [], minus = [];
+  const add = (p, text) => (p > 0 ? plus : minus).push({ p, text });
+
+  if (inst >= 0.6) add(1, `Proffsen äger ${pct(inst)}. Många fonder har granskat bolaget och valt att äga det.`);
+  else if (inst < 0.3) add(-1, `Proffsen äger bara ${pct(inst)}. Få fonder har valt att äga aktien.`);
+
+  if (ins >= 0.05 && ins <= 0.5) add(1, `Ledningen och grundarna äger ${pct(ins)} – de har egna pengar på spel.`);
+
+  if (små > 0.6) add(-1, `Småsparare äger ${pct(små)}. Kursen kan svänga mycket på nyheter och hype.`);
+
+  const ih = ä.insiderhandel;
+  if (ih && ih.netto != null) {
+    if (ih.netto >= 0.01) add(ih.netto >= 0.05 ? 2 : 1, `Ledningen har köpt fler aktier än de sålt senaste halvåret (+${pct(ih.netto, 1)} av deras innehav).`);
+    else if (ih.netto <= -0.05) add(ih.netto <= -0.2 ? -2 : -1, `Ledningen har sålt mycket aktier senaste halvåret (${pct(ih.netto, 1)} av deras innehav).`);
+  }
+
+  // Har de största ägarna ökat eller minskat? (vägt efter hur mycket de äger)
+  const ch = (ä.största || []).filter((o) => o.förändring != null && isFinite(o.förändring) && o.andel > 0);
+  if (ch.length >= 3) {
+    const w = ch.reduce((s, o) => s + o.andel, 0), d = ch.reduce((s, o) => s + o.andel * clip(o.förändring, -1, 1), 0) / w;
+    if (d >= 0.02) add(1, `De största ägarna har ökat sina innehav (i snitt +${pct(d, 1)} senaste kvartalet).`);
+    else if (d <= -0.02) add(-1, `De största ägarna har minskat sina innehav (i snitt ${pct(d, 1)} senaste kvartalet).`);
+  }
+
+  const sh = num(f.blankning);
+  if (sh != null) {
+    if (sh >= 0.2) add(-2, `Hela ${pct(sh)} av aktierna är blankade – många proffs satsar på att kursen ska falla.`);
+    else if (sh >= 0.1) add(-1, `${pct(sh)} av aktierna är blankade – en del proffs satsar på att kursen ska falla.`);
+    else if (sh < 0.03) add(0.5, `Få satsar på att kursen ska falla (${pct(sh, 1)} blankat).`);
+  }
+
+  const poäng = [...plus, ...minus].reduce((s, x) => s + x.p, 0);
+  return {
+    betyg: poäng >= 2 ? "Bra" : poäng <= -2 ? "Dålig" : "Neutral", poäng,
+    plus: plus.map((x) => x.text), minus: minus.map((x) => x.text),
+  };
+}

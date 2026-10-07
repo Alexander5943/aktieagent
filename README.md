@@ -10,7 +10,7 @@ En privat aktieapp för mobilen. Du kan:
   - **makrokänslighet**: hur aktien brukar reagera på börsen, räntan, dollarn, oljan och inflationsoro.
 - **Få en AI-bedömning.** Claude läser bolagets senaste rapport och nyheter och bedömer värdering, hype och vad som är inprisat.
 - **Portfölj.** Lägg in aktierna du investerar i och hur stor andel av pengarna som ligger i varje (t.ex. 50 % Nvidia, 25 % Micron). Appen räknar ut portföljens förväntade avkastning per år (andel × förväntad avkastning, summerat) och visar uträkningen. Varje aktie får ett tips – köp mer, behåll, sälj delvis eller sälj – som räknas om varje gång du öppnar appen, och appen visar vilka tips som ändrats sedan förra dagen. Vid sälj föreslås aktier ur topplistorna som väntas ge mer per år. AI-genomgång på knapptryck (ca 1 kr), eller automatiskt varje vardagskväll om du slår på det (`portfolj_daglig.py`).
-- **Vem äger aktien?** Andel hos institutioner, insiders och småsparare för varje aktie, med en förklaring av vad det betyder.
+- **Vem äger aktien?** Andel hos institutioner, insiders och småsparare för varje aktie, och ett **ägarbetyg** (Bra / Neutral / Dålig) som också väger in om ledningen köpt eller sålt, om storägarna ökat eller minskat och hur mycket aktien är blankad.
 - **Bevaka egna aktier.** Tryck på stjärnan. AI-analysen uppdateras automatiskt varje måndag.
 - **Topplistor** för tre tidshorisonter: 1–6 månader, 1–3 år och 5–10 år (S&P 500, den 1:a varje månad).
 - **Nya börsnoteringar** i USA det senaste året, uppdaterad varje vardagskväll.

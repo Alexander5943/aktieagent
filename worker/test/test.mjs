@@ -101,6 +101,24 @@ await test("makrokänslighet: hittar beta mot börsen", async () => {
   assert.ok(m.förklaringsgrad > 0.3 && m.förklaringsgrad < 1);
 });
 
+await test("ägarbetyg: bra, neutral och dålig ägarbild", async () => {
+  const { ownership } = await import("../src/analys.js");
+  const d = await (await call(makeEnv(), "/api/stock?t=NVDA")).json();
+  // Testaktien: 68 % institutioner (+1), storägarna ökar (+1), lite blankning 1 % (+0,5), insiders säljer bara lite (0)
+  assert.equal(d.ägarbetyg.betyg, "Bra");
+  assert.equal(d.ägarbetyg.poäng, 2.5);
+  assert.equal(d.nyckeltal.ägare.insiderhandel.netto, -0.03);
+  const bra = ownership({ blankning: 0.01, ägare: { institutioner: 0.75, insiders: 0.12, insiderhandel: { netto: 0.06 }, största: [] } });
+  assert.equal(bra.betyg, "Bra"); assert.equal(bra.minus.length, 0);
+  const dålig = ownership({ blankning: 0.25, ägare: { institutioner: 0.2, insiders: 0.01, insiderhandel: { netto: -0.3 },
+    största: [{ andel: 0.05, förändring: -0.1 }, { andel: 0.04, förändring: -0.05 }, { andel: 0.03, förändring: -0.02 }] } });
+  assert.equal(dålig.betyg, "Dålig"); assert.equal(dålig.plus.length, 0);
+  assert.ok(dålig.minus.some((t) => t.includes("blankade")) && dålig.minus.some((t) => t.includes("Småsparare")));
+  assert.equal(ownership({ ägare: { institutioner: 0.45, insiders: 0.02, största: [] } }).betyg, "Neutral");
+  assert.equal(ownership({ ägare: { insiders: 0.3, största: [] } }), null, "utan institutionernas andel blir det inget betyg");
+  assert.equal(ownership({ ägare: { institutioner: 1.4, insiders: 0.1, största: [] } }).betyg, "Neutral", "över 100 % kapas");
+});
+
 await test("okänd ticker ger 404", async () => {
   const r = await call(makeEnv(), "/api/stock?t=NOPE");
   assert.equal(r.status, 404);
