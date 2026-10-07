@@ -132,42 +132,104 @@
     return `<svg width="${w}" height="${h}" viewBox="0 -2 ${w} ${h + 4}"><polyline points="${pts}" fill="none" stroke="var(--${up ? "up" : "down"})" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
   }
 
+  // ---------- Köp- och säljkurser ----------
+  // Ur modellens kursmål om 3 år räknas tre kurser fram:
+  //   köp under      → aktien väntas ge minst 15 % per år de kommande 3 åren
+  //   sälj en del över → under 8 % per år
+  //   sälj allt över → under 4 % per år (ungefär som en räntefond)
+  const NIVÅ = { köp: 0.15, del: 0.08, allt: 0.04 };
+  function levels(kurs3, utd) {
+    if (!(kurs3 > 0)) return null;
+    const bas = kurs3 * (1 + (utd || 0)) ** 3, at = (r) => bas / (1 + r) ** 3;
+    return { bas, köp: at(NIVÅ.köp), del: at(NIVÅ.del), allt: at(NIVÅ.allt) };
+  }
+  const levelsFromSig = (sig) => sig && sig.horisonter && sig.horisonter[3] ? levels(sig.horisonter[3].kurs, sig.utdelning) : null;
+  const levelsFromStock = (s) => { const r = s.horisonter && s.horisonter.rader.find((x) => x.år === 3); return r ? levels(r.kurs, s.horisonter.utdelning) : null; };
+  const RÅD_CLS = { "Köp mer": "buy", "Köp": "buy", "Håll": "neutral", "Vänta": "neutral", "Sälj en del": "hold", "Sälj allt": "avoid", "Köp inte": "avoid" };
+  /** Rådet vid kursen p. owned = om aktien finns i portföljen. hype ≥ 80 gör att köpläget blir "vänta". */
+  function adviceAt(lv, p, owned, hype) {
+    if (!lv || !(p > 0)) return null;
+    const a3 = (lv.bas / p) ** (1 / 3) - 1;
+    let zon = p <= lv.köp ? "köp" : p < lv.del ? "håll" : p < lv.allt ? "del" : "allt";
+    const skäl = [`Väntas ge ${pct(a3, 0)} per år de kommande 3 åren vid dagens kurs.`];
+    if (zon === "köp" && (hype ?? 0) >= 80) { zon = "håll"; skäl.push(`Aktien är mycket hypad (${hype}/100) – vänta gärna in ett lugnare läge.`); }
+    const råd = owned ? { köp: "Köp mer", håll: "Håll", del: "Sälj en del", allt: "Sälj allt" }[zon] : { köp: "Köp", håll: "Vänta", del: "Köp inte", allt: "Köp inte" }[zon];
+    return { råd, zon, a3, skäl };
+  }
+  // Stege: köp | håll | sälj en del | sälj allt, med markering för dagens kurs
+  function ladderHTML(lv, p, owned, cur = "") {
+    if (!lv) return "";
+    const lo = Math.min(p, lv.köp) * 0.85, hi = Math.max(p, lv.allt) * 1.12, x = (v) => clip(((v - lo) / (hi - lo)) * 100, 0, 100);
+    const seg = [[lo, lv.köp, "var(--buy)", owned ? "Köp mer" : "Köp"], [lv.köp, lv.del, "var(--muted)", owned ? "Håll" : "Vänta"], [lv.del, lv.allt, "var(--hold)", owned ? "Sälj en del" : "Köp inte"], [lv.allt, hi, "var(--avoid)", owned ? "Sälj allt" : "Köp inte"]];
+    const d = (v) => num(v, v < 10 ? 2 : 0);
+    return `<div class="ladder" role="img" aria-label="Köp under ${d(lv.köp)}, sälj en del över ${d(lv.del)}, sälj allt över ${d(lv.allt)}. Kursen är ${d(p)}.">
+        <div class="lbar">${seg.map(([a, b, c, n]) => `<i style="left:${x(a)}%;width:${x(b) - x(a)}%;background:${c}" data-tip="${esc(`${n}\n${d(a)}–${d(b)} ${cur}`)}"></i>`).join("")}
+          <div class="lnow" style="left:${x(p)}%"><span>Nu ${d(p)}</span></div></div>
+      </div>
+      <div class="levels">
+        <div><span>${owned ? "Köp mer" : "Köp"} under</span><b class="up">${d(lv.köp)}</b></div>
+        <div><span>Sälj en del över</span><b style="color:var(--hold)">${d(lv.del)}</b></div>
+        <div><span>Sälj allt över</span><b class="down">${d(lv.allt)}</b></div>
+      </div>`;
+  }
+
   async function viewWatch() {
     setTop("Bevakning", `<a class="star" href="#/sok">${ICON.search.replace("<svg", '<svg style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2"')} Lägg till</a>`);
-    const render = (list, quotes = {}, ai = {}) => {
+    const me = {}; current = me;
+    const gone = () => current !== me;
+    const sigs = {}; let quotes = {}, ai = {};
+    const owned = () => new Set((portfolio || []).map((x) => x.t));
+    const render = (list) => {
       if (!list.length) {
         view.innerHTML = `<div class="card empty">${ICON.star}<p><b>Din bevakningslista är tom</b></p>
           <p class="small">Sök efter en aktie och tryck på stjärnan för att följa den.</p>
           <a class="btn" href="#/sok" style="margin-top:8px">Sök aktier</a></div>`;
         return;
       }
+      const own = owned();
       view.innerHTML = `<div class="card">${list.map((w) => {
-        const q = quotes[w.t] || {}, a = ai[w.t];
-        const up = (q.idag ?? 0) >= 0;
+        const q = quotes[w.t] || {}, a = ai[w.t], sig = sigs[w.t];
+        const p = q.pris ?? (sig && sig.pris), lv = levelsFromSig(sig), adv = adviceAt(lv, p, own.has(w.t), sig && sig.hype && sig.hype.poäng);
+        const d = (v) => num(v, v < 10 ? 2 : 0);
         return `<a class="row" href="#/aktie/${encodeURIComponent(w.t)}">
-          <div class="main"><b>${esc(w.t)}</b><span>${esc(w.namn || "")}</span></div>
+          <div class="main"><b>${esc(w.t)}${own.has(w.t) ? ' <small class="owned">äger</small>' : ""}</b><span>${esc(w.namn || "")}</span>
+            <span class="lv">${lv ? `Köp under <b class="up">${d(lv.köp)}</b> · sälj över <b style="color:var(--hold)">${d(lv.del)}</b>` : sig === undefined ? "Räknar köp- och säljkurs …" : "För lite data för köp- och säljkurs"}</span></div>
           ${spark(q.spark, (q.spark && q.spark.at(-1) >= q.spark[0]))}
-          <div class="side"><b>${q.pris != null ? num(q.pris) : '<span class="skeleton" style="display:inline-block;width:52px;height:14px"></span>'}</b>
+          <div class="side"><b>${p != null ? num(p) : '<span class="skeleton" style="display:inline-block;width:52px;height:14px"></span>'}</b>
             <span class="small ${cls(q.idag)}">${q.idag != null ? pct(q.idag, 2) : ""}</span>
-            ${a && !a.saknas ? `<div style="margin-top:3px"><span class="pill ${pillCls(a.betyg)}">${esc(a.betyg)}</span></div>` : ""}</div>
+            <div style="margin-top:3px">${adv ? `<span class="pill ${RÅD_CLS[adv.råd]}">${esc(adv.råd)}</span>` : a && !a.saknas ? `<span class="pill ${pillCls(a.betyg)}">AI: ${esc(a.betyg)}</span>` : ""}</div></div>
         </a>`;
       }).join("")}</div>
+      <details class="card" style="padding-top:12px;padding-bottom:12px"><summary>Så räknas köp- och säljkurserna</summary>
+        <p class="small">Appen räknar ut vad aktien väntas vara värd om 3 år. Ur det räknas tre kurser fram:</p>
+        <ul class="pts small"><li><b>Köp under:</b> där väntas aktien ge minst 15 % per år.</li>
+          <li><b>Sälj en del över:</b> där väntas den ge under 8 % per år.</li>
+          <li><b>Sälj allt över:</b> där väntas den ge under 4 % per år – ungefär som en räntefond, men med mer risk.</li></ul>
+        <p class="small">Mellan köp- och säljkursen är rådet <b>Håll</b> (eller <b>Vänta</b> om du inte äger aktien). Aktier i din portfölj märks med "äger". Tryck på en aktie för hela stegen.</p>
+        <p class="tiny muted">Kurserna flyttar sig när bolagets prognoser ändras. Underlag för egna beslut – inte finansiell rådgivning.</p></details>
       <p class="disclaimer">Kurser uppdateras varje minut. AI-analysen uppdateras automatiskt varje måndag.</p>`;
     };
     render(watch);
     try {
-      const list = await loadWatch();
+      const [list] = await Promise.all([loadWatch(), loadPortfolio().catch(() => portfolio)]);
+      if (gone()) return;
       render(list);
       if (!list.length) return;
       const [q, ais] = await Promise.all([
         api("/api/quotes?symbols=" + list.map((w) => encodeURIComponent(w.t)).join(",")),
         Promise.all(list.map((w) => api("/api/ai?t=" + encodeURIComponent(w.t)).catch(() => null))),
       ]);
-      const qm = {}; q.quotes.forEach((x) => (qm[x.t] = x));
-      const am = {}; list.forEach((w, i) => (am[w.t] = ais[i]));
-      if (location.hash.replace(/^#\/?/, "").startsWith("bevakning") || location.hash === "") render(list, qm, am);
+      q.quotes.forEach((x) => (quotes[x.t] = x));
+      list.forEach((w, i) => (ai[w.t] = ais[i]));
+      if (gone()) return;
+      render(list);
+      // Köp- och säljkurser, fyra aktier åt gången
+      const queue = list.map((w) => w.t);
+      const work = async () => { while (queue.length) { const t = queue.shift(); try { sigs[t] = await api("/api/signal?t=" + encodeURIComponent(t)); } catch { sigs[t] = null; } if (!gone()) render(list); } };
+      await Promise.all([work(), work(), work(), work()]);
     } catch (e) { toast(e.message); }
   }
+
 
   // ---------- Sök ----------
   function viewSearch() {
@@ -317,6 +379,10 @@
   }
   function valBody(s, p) {
     const v = s.värdering, cur = s.valuta ? " " + esc(s.valuta) : "";
+    const lv = levelsFromStock(s), own = (portfolio || []).some((x) => x.t === s.t), adv = adviceAt(lv, p, own, s.hype && s.hype.poäng);
+    const ladder = lv ? `<div class="advice"><div class="verdict" style="justify-content:space-between"><b>Köpa eller sälja?</b><span class="pill ${RÅD_CLS[adv.råd]}" style="font-size:15px;padding:5px 14px">${esc(adv.råd)}</span></div>
+        <p class="small" style="margin:2px 0 4px">${adv.skäl.map(esc).join(" ")}</p>${ladderHTML(lv, p, own, s.valuta || "")}</div>` : "";
+    if (!v) return ladder + `<p class="small muted">Det finns för lite data om vinst och försäljning för att räkna ut ett rimligt värde.</p>`;
     if (!v) return `<p class="small muted">Det finns för lite data om vinst och försäljning för att räkna ut ett rimligt värde.</p>`;
     const gap = p / v.rimligt - 1, l = lägeFor(gap), pos = clip(((gap + 0.6) / 1.2) * 100, 0, 100);
     const ig = impliedAt(v.inprisat.tabell, p), g = v.inprisat.väntad;
@@ -324,7 +390,7 @@
     if (ig != null && g != null) slutsats = ig > g + 0.05 ? "Marknaden räknar med mer än så. Mycket av den goda utvecklingen är redan inprisad."
       : ig < g - 0.05 ? "Marknaden räknar med mindre än så. Förväntningarna i kursen är låga."
       : "Det är ungefär vad som väntas. Kursen speglar förväntningarna.";
-    return `<div class="verdict"><span class="pill ${lägeCls(l)}">${esc(l)}</span>
+    return `${ladder}<h3 style="margin-top:6px">Rimligt värde</h3><div class="verdict"><span class="pill ${lägeCls(l)}">${esc(l)}</span>
         <span class="small muted">Kursen är ${pctAbs(gap)} ${gap >= 0 ? "över" : "under"} rimligt värde</span></div>
       <div class="scale" role="img" aria-label="Kursen jämfört med rimligt värde: ${pct(gap, 0)}">
         <div class="mark" style="left:${pos}%"><span>${pct(gap, 0)}</span></div>
@@ -565,7 +631,8 @@
       </div>
       <div class="quick" id="quick">${(() => {
         const v = s.värdering, b = s.ägarbetyg, chip = (label, val, c, sec) => `<button class="qchip" data-sec="${sec}"><span>${label}</span><b class="pill ${c}">${esc(val)}</b></button>`;
-        return [v ? chip("Värdering", v.läge.replace("Kraftigt ", "Mycket "), lägeCls(v.läge), "sec-varde") : "",
+        const lv = levelsFromStock(s), adv = adviceAt(lv, s.pris, (portfolio || []).some((x) => x.t === s.t), s.hype && s.hype.poäng);
+        return [adv ? chip("Råd", adv.råd, RÅD_CLS[adv.råd], "sec-varde") : "", v ? chip("Värdering", v.läge.replace("Kraftigt ", "Mycket "), lägeCls(v.läge), "sec-varde") : "",
           b ? chip("Ägarbetyg", b.betyg, { Bra: "buy", Neutral: "neutral", Dålig: "avoid" }[b.betyg], "sec-agare") : "",
           `<span id="qai"></span>`].join("");
       })()}</div>
@@ -886,6 +953,7 @@
     if (a3 < 0.04) return tip("Sälj", [R.låg]);
     if ((gap ?? 0) > 0.6) return tip("Sälj", [R.dyr]);
     if ((q ?? 100) < 40 && (gap ?? 0) > 0.3) return tip("Sälj", [R.svag, R.dyr]);
+    if (a3 < NIVÅ.del) return tip("Sälj delvis", [`Förväntad avkastning bara ${pct(a3, 0)} per år de kommande 3 åren – under 8 %.`]);
     if ((hy ?? 0) >= 80) return tip("Sälj delvis", [R.hype]);
     if ((gap ?? 0) > 0.3) return tip("Sälj delvis", [R.dyr]);
     if (weight > 0.35) return tip("Sälj delvis", [R.stor]);
@@ -1032,6 +1100,7 @@
             <div class="holdbody">
               ${x.sig ? kv("Kurs nu", `${num(x.pris)} ${esc(x.sig.valuta || "")}`) : ""}
               ${x.antal > 0 ? kv("Antal / köpkurs", `${num(x.antal, x.antal % 1 ? 2 : 0)} st / ${num(x.gav)}`) + kv("Sedan köp", x.pris ? `<span class="${cls(x.vinst)}">${pct(x.pris / x.gav - 1, 1)}</span>` : "–") : ""}
+              ${(() => { const lv = levelsFromSig(x.sig); return lv ? kv("Köp mer under", `<span class="up">${num(lv.köp)}</span>`) + kv("Sälj en del / allt över", `<span style="color:var(--hold)">${num(lv.del)}</span> / <span class="down">${num(lv.allt)}</span>`) : ""; })()}
               ${x.sig ? kv("Väntat per år (1 / 3 / 10 år)", `${pct(x.r[1], 0)} / ${pct(x.r[3], 0)} / ${pct(x.r[10], 0)}`) : ""}
               ${x.sig && x.sig.värdering ? kv("Värdering", esc(x.sig.värdering.läge)) : ""}
               ${x.sig && x.sig.hype ? kv("Hype", `${x.sig.hype.poäng}/100 · ${esc(x.sig.hype.nivå)}`) : ""}

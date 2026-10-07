@@ -258,3 +258,19 @@ ul.pm.plus li span{color:var(--up)} ul.pm.minus li span{color:var(--down)}
 .qchip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:4px 4px 4px 12px;cursor:pointer;min-height:40px}
 .qchip span{font-size:13px;color:var(--muted);font-weight:600}
 .qchip .pill{font-size:13px}
+
+/* Köp- och säljkurser */
+.row .main span.lv{font-size:12px;color:var(--muted);white-space:nowrap}
+.row .main span.lv b{display:inline;font-size:12px;font-weight:700}
+.advice{background:var(--soft);border-radius:12px;padding:12px;margin:0 0 12px}
+.ladder{margin:28px 0 6px}
+.lbar{position:relative;height:12px}
+.lbar i{position:absolute;top:0;height:12px}
+.lbar i:first-child{border-radius:6px 0 0 6px} .lbar i:nth-child(4){border-radius:0 6px 6px 0}
+.lnow{position:absolute;top:-6px;width:3px;height:24px;background:var(--text);border-radius:2px;transform:translateX(-1.5px)}
+.lnow span{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);font-size:11px;font-weight:700;white-space:nowrap}
+.levels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:10px}
+.levels div{background:var(--card);border-radius:10px;padding:8px}
+.levels span{display:block;font-size:11px;color:var(--muted)}
+.levels b{font-size:16px;font-variant-numeric:tabular-nums}
+.owned{display:inline-block;font-size:11px;font-weight:650;color:var(--muted);background:var(--soft);border-radius:999px;padding:1px 7px;vertical-align:middle}
