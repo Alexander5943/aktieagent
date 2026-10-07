@@ -1,0 +1,36 @@
+name: Kontrollera servern
+
+# Startas manuellt. Hämtar en aktie från servern och visar vad som kom tillbaka.
+on:
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: "Aktie att kontrollera"
+        default: "NVDA"
+
+permissions:
+  contents: read
+
+jobs:
+  kontroll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Fråga servern
+        env:
+          APP_KEY: ${{ secrets.APP_KEY }}
+          T: ${{ inputs.ticker }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, urllib.request
+          url = re.search(r'workerUrl:\s*"([^"]+)"', open("docs/config.js").read()).group(1)
+          req = urllib.request.Request(f"{url}/api/stock?t={os.environ['T']}", headers={"X-App-Key": os.environ["APP_KEY"]})
+          d = json.load(urllib.request.urlopen(req, timeout=60))
+          ä = (d.get("nyckeltal") or {}).get("ägare")
+          print(f"::notice title=Nyckeltal::{'finns' if d.get('nyckeltal') else 'SAKNAS'}")
+          print(f"::notice title=Ägare::{json.dumps({k: v for k, v in (ä or {}).items() if k != 'största'}, ensure_ascii=False)}")
+          print(f"::notice title=Största ägare::{len((ä or {}).get('största') or [])} st, förändring: {[o.get('förändring') for o in (ä or {}).get('största') or []][:4]}")
+          print(f"::notice title=Ägarbetyg::{json.dumps(d.get('ägarbetyg'), ensure_ascii=False)[:900]}")
+          print(f"::notice title=Hämtad::{d.get('hämtad')}")
+          PY
