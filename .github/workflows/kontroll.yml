@@ -39,5 +39,7 @@ jobs:
           print(f"::notice title=Ägarbetyg::{json.dumps(d.get('ägarbetyg'), ensure_ascii=False)[:900]}")
           print(f"::notice title=Hämtad::{d.get('hämtad')}")
           ping = json.load(urllib.request.urlopen(urllib.request.Request(f"{url}/api/ping", headers={"X-App-Key": os.environ["APP_KEY"], "User-Agent": "aktieagent-kontroll"}), timeout=30))
+          sig = json.load(urllib.request.urlopen(urllib.request.Request(f"{url}/api/signal?t={os.environ['T']}", headers={"X-App-Key": os.environ["APP_KEY"], "User-Agent": "aktieagent-kontroll"}), timeout=60))
+          print(f"::notice title=Signal::pris {sig.get('pris')} kursmål 3 år {(sig.get('horisonter') or {}).get('3')} utdelning {sig.get('utdelning')}")
           print(f"::notice title=App-kod::{'KORT (under 16 tecken)' if ping.get('svagKod') else 'stark'}")
           PY
