@@ -1201,6 +1201,7 @@
         <label class="switch"><span>Analysera automatiskt när jag öppnar en aktie<br><span class="small muted">Varje ny analys kostar ungefär 1–2 kr. En analys sparas i 7 dagar.</span></span>
           <input type="checkbox" id="auto" ${LS.get("autoAI", true) ? "checked" : ""}></label>
       </div>
+      <div class="card" id="skydd"><h2>Skydd</h2><p class="small muted">Kontrollerar …</p></div>
       <div class="card"><h2>Konto</h2>
         <p class="small muted">Servern: ${esc(serverUrl() || "ej kopplad")}</p>
         <button class="btn sec" id="logout">Logga ut</button>
@@ -1211,6 +1212,13 @@
       </div>`;
     $("#auto").onchange = (e) => { LS.set("autoAI", e.target.checked); toast(e.target.checked ? "Automatisk AI-analys på" : "Automatisk AI-analys av"); };
     $("#logout").onclick = () => { LS.del("key"); route(); };
+    api("/api/ping").then((p) => {
+      const el = $("#skydd"); if (!el) return;
+      el.innerHTML = `<h2>Skydd</h2>
+        <p class="small">Bara den som har din app-kod kan söka, se aktiesidor, använda AI:n och se din portfölj och bevakningslista. Efter 10 felaktiga försök spärras den som gissar i en timme.</p>
+        ${p.svagKod ? `<p class="small" style="color:var(--warn)"><b>Din app-kod är kort.</b> Byt till en längre kod (minst 16 tecken) så blir den omöjlig att gissa. Ändra APP_KEY i GitHub och kör "Uppdatera servern".</p>`
+          : `<p class="small"><span class="pill buy">Stark app-kod</span></p>`}`;
+    }).catch(() => {});
   }
 
   route();

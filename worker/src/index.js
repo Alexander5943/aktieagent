@@ -31,10 +31,17 @@ export default {
     const url = new URL(req.url);
     try {
       if (!env.APP_KEY) return json({ error: "APP_KEY saknas på servern." }, 500);
-      if (req.headers.get("X-App-Key") !== env.APP_KEY) return json({ error: "Fel app-kod." }, 401);
+      // Skydd mot att någon gissar app-koden: max 10 fel per timme från samma internetadress
+      const ip = req.headers.get("CF-Connecting-IP") || "okänd";
+      const fails = Number((await env.AKTIE_KV.get("fel:" + ip)) || 0);
+      if (fails >= MAX_FEL) return json({ error: "För många felaktiga försök. Vänta en timme och försök igen." }, 429);
+      if (!sameKey(req.headers.get("X-App-Key") || "", env.APP_KEY)) {
+        await env.AKTIE_KV.put("fel:" + ip, String(fails + 1), { expirationTtl: 3600 });
+        return json({ error: "Fel app-kod." }, 401);
+      }
 
       const p = url.pathname;
-      if (p === "/api/ping") return json({ ok: true, model: MODEL });
+      if (p === "/api/ping") return json({ ok: true, model: MODEL, svagKod: env.APP_KEY.length < 16 });
       if (p === "/api/search") return json(await search(url.searchParams.get("q") || "", ctx));
       if (p === "/api/quotes") return json(await quotes((url.searchParams.get("symbols") || "").split(","), ctx));
       if (p === "/api/stock") return json(await stock(ticker(url), env, ctx));
@@ -71,6 +78,14 @@ export default {
     }
   },
 };
+
+const MAX_FEL = 10;
+// Jämför app-koden utan att avslöja hur många tecken som stämde (tar lika lång tid oavsett)
+function sameKey(a, b) {
+  let d = a.length ^ b.length;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) d |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  return d === 0;
+}
 
 function ticker(url) {
   const t = (url.searchParams.get("t") || "").trim().toUpperCase();

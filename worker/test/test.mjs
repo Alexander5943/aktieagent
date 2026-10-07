@@ -19,6 +19,17 @@ await test("fel app-kod ger 401", async () => {
   assert.equal(r.status, 401);
 });
 
+await test("för många fel app-koder spärrar i en timme, rätt kod fungerar från annan adress", async () => {
+  const env = makeEnv();
+  const from = (ip, key) => worker.fetch(new Request("https://w.dev/api/ping", { headers: { "X-App-Key": key, "CF-Connecting-IP": ip } }), env, ctx);
+  for (let i = 0; i < 10; i++) assert.equal((await from("1.2.3.4", "gissning" + i)).status, 401);
+  assert.equal((await from("1.2.3.4", "hemlig")).status, 429, "spärrad även med rätt kod");
+  assert.equal((await from("5.6.7.8", "hemlig")).status, 200, "andra adresser påverkas inte");
+  assert.equal((await from("5.6.7.8", "hemli")).status, 401, "nästan rätt räcker inte");
+  const ping = await (await from("5.6.7.8", "hemlig")).json();
+  assert.equal(ping.svagKod, true, "kort kod flaggas");
+});
+
 await test("ping och CORS", async () => {
   const r = await call(makeEnv(), "/api/ping");
   assert.equal(r.status, 200);
