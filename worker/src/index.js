@@ -45,6 +45,10 @@ export default {
       if (p === "/api/portfolio" && req.method === "GET") return json(await getPortfolio(env));
       if (p === "/api/portfolio" && req.method === "POST") return json(await editPortfolio(await req.json(), env));
       if (p === "/api/signal") return json(await signal(ticker(url), env, ctx));
+      if (p === "/api/portfolio/tips" && req.method === "GET") return json((await env.AKTIE_KV.get("portfolio:tips", "json")) || {});
+      if (p === "/api/portfolio/tips" && req.method === "POST") return json(await saveTips(await req.json(), env));
+      if (p === "/api/portfolio/settings" && req.method === "GET") return json(await getSettings(env));
+      if (p === "/api/portfolio/settings" && req.method === "POST") return json(await saveSettings(await req.json(), env));
       if (p === "/api/portfolio/advice" && req.method === "GET") return json((await env.AKTIE_KV.get("portfolio:advice", "json")) || { saknas: true });
       if (p === "/api/portfolio/advice" && req.method === "POST") return json(await portfolioAdvice(await req.json(), env));
       return json({ error: "Okänd adress." }, 404);
@@ -505,10 +509,15 @@ async function editPortfolio(body, env) {
   let list = await getPortfolio(env);
   const t = cleanT(body.t);
   if (body.action === "set") {
-    const antal = fnum(body.antal), gav = fnum(body.gav);
-    if (!(antal > 0 && antal < 1e9)) throw httpError("Ange hur många aktier du äger.", 400);
-    if (!(gav > 0 && gav < 1e7)) throw httpError("Ange vad du betalade per aktie.", 400);
-    const row = { t, namn: str(body.namn || t, 80), antal, gav, ändrad: Date.now() };
+    // Andel i procent och/eller antal + köpkurs. Minst ett av dem.
+    const opt = (x) => (x == null || x === "" ? null : fnum(x));
+    const andel = opt(body.andel), antal = opt(body.antal), gav = opt(body.gav);
+    if (andel != null && !(andel > 0 && andel <= 100)) throw httpError("Andelen ska vara mellan 0 och 100 %.", 400);
+    if (antal != null && !(antal > 0 && antal < 1e9)) throw httpError("Antal aktier ska vara större än 0.", 400);
+    if (gav != null && !(gav > 0 && gav < 1e7)) throw httpError("Köpkursen ska vara större än 0.", 400);
+    if ((antal == null) !== (gav == null)) throw httpError("Fyll i både antal aktier och köpkurs, eller inget av dem.", 400);
+    if (andel == null && antal == null) throw httpError("Ange hur stor andel av portföljen aktien är, eller antal aktier och köpkurs.", 400);
+    const row = { t, namn: str(body.namn || t, 80), andel, antal, gav, ändrad: Date.now() };
     const i = list.findIndex((x) => x.t === t);
     if (i >= 0) list[i] = { ...list[i], ...row }; else list.push({ ...row, tillagd: Date.now() });
   }
@@ -516,6 +525,48 @@ async function editPortfolio(body, env) {
   if (list.length > 40) throw httpError("Max 40 innehav.", 400);
   await env.AKTIE_KV.put("portfolio", JSON.stringify(list));
   return list;
+}
+
+/**
+ * Hur stor del av portföljen varje aktie är (summerar till 1). Samma regel finns i appen (weightsFor i app.js).
+ *  - Alla har en andel i %: andelarna gäller (delas med summan om de inte blir exakt 100).
+ *  - Ingen har andel men alla har antal: efter marknadsvärde.
+ *  - Ingen har något av det: lika mycket i varje.
+ *  - Blandat: angivna andelar gäller, resten delar lika på det som blir över upp till 100 %.
+ */
+export function weightsFor(list, priceOf = () => null) {
+  const n = list.length;
+  if (!n) return { w: [], sätt: null, summa: 0 };
+  const hasA = list.map((x) => x.andel > 0), sumA = list.reduce((s, x) => s + (x.andel > 0 ? x.andel : 0), 0);
+  const norm = (raw) => { const s = raw.reduce((a, b) => a + b, 0); return s > 0 ? raw.map((v) => v / s) : raw.map(() => 1 / n); };
+  if (hasA.every(Boolean)) return { w: norm(list.map((x) => x.andel)), sätt: "andel", summa: sumA };
+  if (!hasA.some(Boolean)) {
+    if (list.every((x) => x.antal > 0)) return { w: norm(list.map((x) => x.antal * (priceOf(x.t) || x.gav))), sätt: "värde", summa: 100 };
+    return { w: list.map(() => 1 / n), sätt: "lika", summa: 100 };
+  }
+  const miss = hasA.filter((h) => !h).length, rest = Math.max(0, 100 - sumA);
+  return { w: norm(list.map((x) => (x.andel > 0 ? x.andel : rest / miss))), sätt: "blandat", summa: sumA };
+}
+
+async function getSettings(env) {
+  return { dagligAI: false, ...((await env.AKTIE_KV.get("portfolio:settings", "json")) || {}) };
+}
+async function saveSettings(body, env) {
+  const s = { ...(await getSettings(env)), dagligAI: !!body.dagligAI };
+  await env.AKTIE_KV.put("portfolio:settings", JSON.stringify(s));
+  return s;
+}
+
+/** Sparar dagens tips (köp mer/behåll/sälj) så att appen kan visa vad som ändrats sedan förra dagen. */
+async function saveTips(body, env) {
+  const datum = String(body.datum || "").slice(0, 10);
+  if (!/^\d{4}-\d\d-\d\d$/.test(datum)) throw httpError("Ogiltigt datum.", 400);
+  const tips = {};
+  for (const [t, r] of Object.entries(body.tips || {}).slice(0, 40)) if (/^[A-Z0-9.\-^=]{1,15}$/.test(t) && RAD.includes(r)) tips[t] = r;
+  const cur = (await env.AKTIE_KV.get("portfolio:tips", "json")) || {};
+  const out = cur.senast && cur.senast.datum !== datum ? { förra: cur.senast, senast: { datum, tips } } : { förra: cur.förra || null, senast: { datum, tips } };
+  await env.AKTIE_KV.put("portfolio:tips", JSON.stringify(out));
+  return out;
 }
 
 /** Det viktigaste om en aktie, litet nog för att hämta för hela portföljen. */
@@ -583,7 +634,7 @@ const ADVICE_TOOL = {
   },
 };
 
-const portfolioKey = (list) => list.map((x) => `${x.t}:${x.antal}`).sort().join(",");
+const portfolioKey = (list) => list.map((x) => `${x.t}:${x.andel ?? ""}:${x.antal ?? ""}`).sort().join(",");
 
 async function portfolioAdvice(body, env) {
   if (!env.ANTHROPIC_API_KEY) throw httpError("ANTHROPIC_API_KEY saknas på servern.", 500);
@@ -592,12 +643,13 @@ async function portfolioAdvice(body, env) {
   // Appen skickar med signalerna den redan hämtat (så slipper servern hämta allt igen). Rensa och begränsa.
   const sig = new Map((Array.isArray(body.signaler) ? body.signaler : []).slice(0, 40).map((x) => [String(x.t || "").toUpperCase(), x]));
   const owned = new Set(list.map((x) => x.t));
-  const total = list.reduce((s, x) => s + x.antal * (fnum((sig.get(x.t) || {}).pris) || x.gav), 0);
-  const innehav = list.map((x) => {
-    const g = sig.get(x.t) || {}, pris = fnum(g.pris) || x.gav;
+  const { w } = weightsFor(list, (t) => fnum((sig.get(t) || {}).pris));
+  const innehav = list.map((x, i) => {
+    const g = sig.get(x.t) || {}, pris = fnum(g.pris);
     const h = g.horisonter || {}, a = (k) => fnum(h[k] && h[k].årlig);
     return {
-      ticker: x.t, namn: str(x.namn, 80), antal: x.antal, köpkurs: x.gav, kurs: pris, vinst: pris / x.gav - 1, andel: total ? (x.antal * pris) / total : null,
+      ticker: x.t, namn: str(x.namn, 80), andel: w[i], antal: x.antal ?? null, köpkurs: x.gav ?? null, kurs: pris,
+      vinst: x.gav && pris ? pris / x.gav - 1 : null,
       sektor: str(g.sektor, 40), förväntad_per_år: { "1": a(1), "3": a(3), "5": a(5), "10": a(10) },
       värdering: g.värdering ? { läge: str(g.värdering.läge, 30), gap: fnum(g.värdering.gap) } : null,
       hype: g.hype ? fnum(g.hype.poäng) : null, kvalitet: fnum(g.poäng), förlustbolag: !!g.förlustbolag,
@@ -610,9 +662,12 @@ async function portfolioAdvice(body, env) {
       per_år_3år: fnum(k.årlig_3år), per_år_10år: fnum(k.årlig_10år), förväntad_1år: fnum(k.förväntad), kvalitet: fnum(k.kvalitet), ai: str(k.ai, 30) }))
     .filter((k) => /^[A-Z0-9.\-]{1,15}$/.test(k.ticker) && !owned.has(k.ticker));
   const candSet = new Set(kandidater.map((k) => k.ticker));
+  // Portföljens förväntade avkastning per år, viktad efter andelarna (exakt, räknas inte av AI:n)
+  const weighted = (yrs) => { let v = 0, ws = 0; innehav.forEach((x) => { const r = x.förväntad_per_år[yrs]; if (r != null) { v += r * x.andel; ws += x.andel; } }); return ws ? v / ws : null; };
+  const före = weighted("3");
 
   await countAI(env);
-  const messages = [{ role: "user", content: `Dagens datum: ${new Date().toISOString().slice(0, 10)}.\n\nMina innehav:\n${JSON.stringify(innehav)}\n\nKandidater:\n${JSON.stringify(kandidater)}` }];
+  const messages = [{ role: "user", content: `Dagens datum: ${new Date().toISOString().slice(0, 10)}.\n\nPortföljens förväntade avkastning per år (3 år, viktad efter andelarna): ${före == null ? "okänd" : (före * 100).toFixed(1) + " %"}.\n\nMina innehav (andel = del av portföljen):\n${JSON.stringify(innehav)}\n\nKandidater:\n${JSON.stringify(kandidater)}` }];
   for (let round = 0; round < 3; round++) {
     const res = await claude(env, { model: MODEL, max_tokens: 6000, system: ADVICE_SYSTEM, tools: [ADVICE_TOOL], messages });
     const v = res.content.find((b) => b.type === "tool_use" && b.name === "submit_advice");
@@ -624,7 +679,7 @@ async function portfolioAdvice(body, env) {
           .filter((a) => candSet.has(a.t)).slice(0, 3), // bara aktier som faktiskt fanns i listan
       })).filter((r) => owned.has(r.t));
       const out = {
-        sammanfattning: str(i.sammanfattning, 1200), före: fnum(i.forvantad_fore), efter: fnum(i.forvantad_efter),
+        sammanfattning: str(i.sammanfattning, 1200), före: före ?? fnum(i.forvantad_fore), efter: fnum(i.forvantad_efter), automatisk: !!body.automatisk,
         innehav: rows, att_tänka_på: (Array.isArray(i.att_tanka_pa) ? i.att_tanka_pa : []).map((x) => str(x, 300)).slice(0, 5),
         kandidater: kandidater.filter((k) => rows.some((r) => r.alternativ.some((a) => a.t === k.ticker))),
         portfölj: portfolioKey(list), modell: MODEL, skapad: Date.now(),

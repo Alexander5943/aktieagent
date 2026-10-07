@@ -1,0 +1,30 @@
+name: Portföljens AI-genomgång
+
+# Varje vardagskväll efter att börsen i New York stängt.
+# Gör bara något om "Daglig AI-genomgång" är påslagen i appens Portfölj-flik (ca 1 kr per gång).
+on:
+  schedule:
+    - cron: "30 21 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency: portfolj
+
+jobs:
+  genomgang:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: AI-genomgång av portföljen
+        env:
+          APP_KEY: ${{ secrets.APP_KEY }}
+          PYTHONIOENCODING: utf-8
+        run: python portfolj_daglig.py

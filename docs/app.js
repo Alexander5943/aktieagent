@@ -359,10 +359,9 @@
       ${a.idé ? `<p class="tiny muted">Enligt AI-analysen ${esc(ago(a.analyserad))}.</p>` : ""}`;
   }
   function bolagCard(s) {
-    const f = s.nyckeltal || {}, ä = f.ägare;
+    const f = s.nyckeltal || {};
     const kv = (k, v) => (v == null || v === "" ? "" : `<div class="kv"><span>${k}</span><b>${v}</b></div>`);
     const host = (u) => String(u || "").replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "");
-    const maxA = ä && ä.största.length ? Math.max(...ä.största.map((o) => o.andel || 0)) : 1;
     return `<div class="card" id="sec-bolag"><h2>Bolaget</h2>
       <div id="framtidbox"></div>
       <div id="aibolag">${aiBolag(null)}</div>
@@ -372,13 +371,43 @@
       ${kv("Anställda", f.anställda != null ? num(f.anställda, 0) : null)}${kv("Säte", esc([f.stad, f.land].filter(Boolean).join(", ")))}
       ${kv("Börsvärde", f.börsvärde != null ? big(f.börsvärde) + " " + esc(s.valuta || "") : null)}
       ${f.webb ? kv("Webbplats", `<a href="${safeUrl(f.webb)}" target="_blank" rel="noopener">${esc(host(f.webb))}</a>`) : ""}
-      ${ä ? `<h3>Ägare och investerare</h3>
-        ${kv("Institutioner (fonder, banker)", ä.institutioner != null ? `${pct(ä.institutioner, 0, false)}${ä.antal_institutioner ? ` · ${num(ä.antal_institutioner, 0)} st` : ""}` : null)}
-        ${kv("Insiders (ledning, grundare)", ä.insiders != null ? pct(ä.insiders, 1, false) : null)}
-        ${ä.största.length ? `<p class="small muted" style="margin:10px 0 2px">Största institutionella ägare</p>${ä.största.map((o) => `<div class="holder" data-tip="${esc(`${o.namn}\n${pct(o.andel, 2, false)} av aktierna${o.värde ? "\nVärde " + big(o.värde) : ""}${o.datum ? "\nRapporterat " + o.datum : ""}`)}" tabindex="0">
-          <span>${esc(o.namn)}</span><div class="track"><div class="fill" style="width:${((o.andel || 0) / maxA) * 100}%"></div></div><b>${pct(o.andel, 1, false)}</b></div>`).join("")}` : ""}
-        <p class="tiny muted">Senast rapporterade innehav (USA:s 13F-rapporter, upp till 3 månader gamla).</p>` : ""}
     </div>`;
+  }
+
+  // ----- Vem äger aktien? -----
+  // Yahoo ger andelen hos institutioner och insiders. Resten ägs av småsparare och övriga.
+  function ownerSplit(ä) {
+    if (!ä || ä.institutioner == null) return null; // utan institutionernas andel går resten inte att räkna ut
+    const instRå = ä.institutioner, inst = clip(instRå, 0, 1), ins = clip(ä.insiders ?? 0, 0, 1 - inst);
+    return { inst, ins, små: Math.max(0, 1 - inst - ins), överRapporterat: instRå > 1.0001, antal: ä.antal_institutioner };
+  }
+  function ownerCard(s) {
+    const ä = (s.nyckeltal || {}).ägare, o = ownerSplit(ä);
+    if (!o) {
+      const top = ä && ä.största && ä.största.length ? ä.största : null;
+      return `<div class="card" id="sec-agare"><h2>Vem äger aktien?</h2><p class="small muted">Yahoo Finance har ingen uppgift om hur stor del institutioner och småsparare äger.${ä && ä.insiders != null ? ` Insiders (ledning, grundare) äger ${pct(ä.insiders, 1, false)}.` : ""}</p>
+        ${top ? `<h3>Största ägarna</h3>${top.map((x) => `<div class="holder"><span>${esc(x.namn)}</span><span></span><b>${pct(x.andel, 1, false)}</b></div>`).join("")}` : ""}</div>`;
+    }
+    const seg = [["Institutioner", o.inst, "var(--o1)", "Fonder, pensionsbolag, banker"], ["Insiders", o.ins, "var(--o2)", "Ledning, styrelse, grundare"], ["Småsparare och övriga", o.små, "var(--o3)", "Privatpersoner som du och jag, m.fl."]];
+    const tolkning = [];
+    if (o.inst >= 0.7) tolkning.push(["Proffsen äger det mesta.", "Många fonder har granskat bolaget och vågar äga det. Aktien brukar vara stabilare och välbevakad – men det är svårare att hitta ett fynd som ingen annan sett."]);
+    else if (o.inst >= 0.4) tolkning.push(["Blandat ägande.", "Både proffs och privatpersoner äger en stor del."]);
+    else tolkning.push(["Mycket ägs av småsparare.", "Kursen kan svänga mer och drivas av nyheter och hype. Det kan också betyda att proffsen inte har upptäckt bolaget än – eller att de valt bort det."]);
+    if (o.ins >= 0.1) tolkning.push(["Ledningen äger mycket själv.", `Insiders äger ${pct(o.ins, 0, false)}. De har egna pengar på spel, vilket brukar ses som ett gott tecken.`]);
+    else if (o.ins >= 0.01) tolkning.push(["Ledningen äger en del själv.", `Insiders äger ${pct(o.ins, 0, false)} – de har en del egna pengar i bolaget.`]);
+    else tolkning.push(["Ledningen äger nästan inget.", "Det är vanligt i stora bolag, men betyder att ledningen har lite egna pengar på spel."]);
+    const maxA = ä.största && ä.största.length ? Math.max(...ä.största.map((x) => x.andel || 0)) : 1;
+    return `<div class="card" id="sec-agare"><h2>Vem äger aktien?</h2>
+      <div class="stack" role="img" aria-label="Institutioner ${pct(o.inst, 0, false)}, insiders ${pct(o.ins, 0, false)}, småsparare och övriga ${pct(o.små, 0, false)}">
+        ${seg.filter(([, v]) => v > 0.002).map(([n, v, c]) => `<i style="flex:${v};background:${c}" data-tip="${esc(`${n}\n${pct(v, 1, false)} av aktierna`)}" tabindex="0"></i>`).join("")}</div>
+      <div class="owners">${seg.map(([n, v, c, d]) => `<div><i style="background:${c}"></i><span>${n}<small>${d}</small></span><b>${pct(v, 0, false)}</b></div>`).join("")}</div>
+      ${o.överRapporterat ? `<p class="tiny muted">Institutionernas andel rapporteras till över 100 % (samma aktier räknas ibland två gånger, t.ex. vid blankning). Den visas som 100 %.</p>` : ""}
+      ${o.antal ? `<p class="small muted" style="margin:8px 0 0">${num(o.antal, 0)} institutioner äger aktien.</p>` : ""}
+      <h3>Vad betyder det?</h3>
+      ${tolkning.map(([r, t]) => `<p class="small" style="margin:4px 0 8px"><b>${r}</b> ${t}</p>`).join("")}
+      ${ä.största && ä.största.length ? `<details><summary>Största ägarna</summary>${ä.största.map((x) => `<div class="holder" data-tip="${esc(`${x.namn}\n${pct(x.andel, 2, false)} av aktierna${x.värde ? "\nVärde " + big(x.värde) : ""}${x.datum ? "\nRapporterat " + x.datum : ""}`)}" tabindex="0">
+          <span>${esc(x.namn)}</span><div class="track"><div class="fill" style="width:${((x.andel || 0) / maxA) * 100}%"></div></div><b>${pct(x.andel, 1, false)}</b></div>`).join("")}</details>` : ""}
+      <p class="tiny muted">Ägandet är en ledtråd, inte ett betyg. Uppgifterna kommer från bolagens och fondernas rapporter till USA:s finansinspektion och kan vara upp till 3 månader gamla.</p></div>`;
   }
 
   // ----- Säsongsmönster -----
@@ -515,14 +544,14 @@
     $("#topaction").innerHTML = starBtn();
 
     const metric = (label, val) => `<div><span>${label}</span><b>${val}</b></div>`;
-    const sections = [["sec-chart", "Graf"], ["sec-ai", "AI"], ["sec-avk", "Avkastning"], ["sec-varde", "Värdering"], ["sec-bolag", "Bolaget"], ["sec-sasong", "Säsong"], ["sec-makro", "Makro"], ["sec-tal", "Nyckeltal"]];
+    const sections = [["sec-chart", "Graf"], ["sec-ai", "AI"], ["sec-avk", "Avkastning"], ["sec-varde", "Värdering"], ["sec-agare", "Ägare"], ["sec-bolag", "Bolaget"], ["sec-sasong", "Säsong"], ["sec-makro", "Makro"], ["sec-tal", "Nyckeltal"]];
     view.innerHTML = `
       <div class="hero">
         <div class="name">${esc(s.namn)} · ${esc(t)}${s.börs ? " · " + esc(s.börs) : ""}</div>
         <div class="price"><span id="price">${num(s.pris)}</span> <span class="small muted">${esc(s.valuta || "")}</span></div>
         <div class="chg ${cls(s.idag)}" id="chg">${pct(s.idag, 2)} idag</div>
         <div class="tiny muted" id="liveinfo"></div>
-        <div class="small" style="margin-top:6px">${(() => { const h = portfolio.find((x) => x.t === t); return h ? `Du äger ${num(h.antal, h.antal % 1 ? 2 : 0)} st (köpt för ${num(h.gav)}) · <a href="#/portfolj">Se tips i portföljen</a>` : `<a href="#/portfolj/ny/${encodeURIComponent(t)}">+ Lägg till i portföljen</a>`; })()}</div>
+        <div class="small" style="margin-top:6px">${(() => { const h = portfolio.find((x) => x.t === t); return h ? `I din portfölj${h.andel ? ` (${num(h.andel, 0)} %)` : h.antal ? ` (${num(h.antal, h.antal % 1 ? 2 : 0)} st)` : ""} · <a href="#/portfolj">Se dagens tips</a>` : `<a href="#/portfolj/ny/${encodeURIComponent(t)}">+ Lägg till i portföljen</a>`; })()}</div>
       </div>
       <nav class="jump" id="jump" aria-label="Hoppa till">${sections.map(([id, l]) => `<button data-sec="${id}">${l}</button>`).join("")}</nav>
       <div class="card" style="padding-top:8px" id="sec-chart">
@@ -533,6 +562,7 @@
       <div id="sec-ai"><div id="aiwrap">${aiLoading("Hämtar AI-analys…")}</div></div>
       ${hzCard(s)}
       ${valCard(s)}
+      ${ownerCard(s)}
       ${bolagCard(s)}
       ${seasonCard(s)}
       ${macroCard(s)}
@@ -824,14 +854,25 @@
   function ruleTip(sig, weight) {
     const a3 = annual(sig), gap = sig && sig.värdering ? sig.värdering.gap : null, hy = sig && sig.hype ? sig.hype.poäng : null, q = sig ? sig.poäng : null;
     if (a3 == null) return { råd: "Behåll", skäl: ["För lite data för att räkna ut en förväntad avkastning."] };
-    const skäl = [`Förväntad avkastning ${pct(a3, 0)} per år de kommande 3 åren.`];
-    if (gap != null) skäl.push(`${sig.värdering.läge} (${pct(gap, 0)} mot rimligt värde).`);
-    if (hy != null && hy >= 65) skäl.push(`Hög hype (${hy}/100) – risk för besvikelse.`);
-    if (weight > 0.3) skäl.push(`Aktien är ${pct(weight, 0, false)} av portföljen – mycket på ett kort.`);
-    if (a3 < 0.04 || (q < 40 && (gap ?? 0) > 0.3) || (gap ?? 0) > 0.6) return { råd: "Sälj", skäl };
-    if ((hy ?? 0) >= 80 || (gap ?? 0) > 0.3 || weight > 0.35) return { råd: "Sälj delvis", skäl };
-    if (a3 >= 0.15 && (q ?? 0) >= 55 && (gap ?? 0) <= 0.15 && (hy ?? 0) < 75 && weight < 0.25) return { råd: "Köp mer", skäl };
-    return { råd: "Behåll", skäl };
+    const R = {
+      låg: `Låg förväntad avkastning: ${pct(a3, 0)} per år de kommande 3 åren.`,
+      bra: `Förväntad avkastning ${pct(a3, 0)} per år de kommande 3 åren.`,
+      dyr: gap != null ? `${sig.värdering.läge}: kursen är ${pct(gap, 0)} mot rimligt värde.` : null,
+      billig: gap != null ? `${sig.värdering.läge} (${pct(gap, 0)} mot rimligt värde).` : null,
+      hype: hy != null ? `Hög hype (${hy}/100) – risk för besvikelse om förväntningarna inte nås.` : null,
+      svag: q != null ? `Svag analyspoäng (${q}/100).` : null,
+      stor: `Aktien är ${pct(weight, 0, false)} av portföljen – mycket på ett kort. Sprid gärna en del till andra aktier.`,
+    };
+    const tip = (råd, first) => ({ råd, skäl: [...new Set([...first, R.bra, R.billig].filter(Boolean))] });
+    // Det som avgör tipset står först
+    if (a3 < 0.04) return tip("Sälj", [R.låg]);
+    if ((gap ?? 0) > 0.6) return tip("Sälj", [R.dyr]);
+    if ((q ?? 100) < 40 && (gap ?? 0) > 0.3) return tip("Sälj", [R.svag, R.dyr]);
+    if ((hy ?? 0) >= 80) return tip("Sälj delvis", [R.hype]);
+    if ((gap ?? 0) > 0.3) return tip("Sälj delvis", [R.dyr]);
+    if (weight > 0.35) return tip("Sälj delvis", [R.stor]);
+    if (a3 >= 0.15 && (q ?? 0) >= 55 && (gap ?? 0) <= 0.15 && (hy ?? 0) < 75 && weight < 0.25) return tip("Köp mer", [R.bra, R.billig]);
+    return tip("Behåll", [R.bra, weight > 0.3 ? R.stor : null]);
   }
 
   // Kandidater att byta till: aktierna i topplistorna 1–3 år och 5–10 år (eller förra 12-månaderslistan)
@@ -855,78 +896,136 @@
       .sort((a, b) => (candAnnual(b) + (b.sektor !== sek ? 0.02 : 0)) - (candAnnual(a) + (a.sektor !== sek ? 0.02 : 0))).slice(0, 3);
   }
 
+  // Samma regel som servern (weightsFor i worker/src/index.js): hur stor del av portföljen varje aktie är
+  function weightsFor(list, priceOf = () => null) {
+    const n = list.length;
+    if (!n) return { w: [], sätt: null, summa: 0 };
+    const hasA = list.map((x) => x.andel > 0), sumA = list.reduce((s, x) => s + (x.andel > 0 ? x.andel : 0), 0);
+    const norm = (raw) => { const s = raw.reduce((a, b) => a + b, 0); return s > 0 ? raw.map((v) => v / s) : raw.map(() => 1 / n); };
+    if (hasA.every(Boolean)) return { w: norm(list.map((x) => x.andel)), sätt: "andel", summa: sumA };
+    if (!hasA.some(Boolean)) {
+      if (list.every((x) => x.antal > 0)) return { w: norm(list.map((x) => x.antal * (priceOf(x.t) || x.gav))), sätt: "värde", summa: 100 };
+      return { w: list.map(() => 1 / n), sätt: "lika", summa: 100 };
+    }
+    const miss = hasA.filter((h) => !h).length, rest = Math.max(0, 100 - sumA);
+    return { w: norm(list.map((x) => (x.andel > 0 ? x.andel : rest / miss))), sätt: "blandat", summa: sumA };
+  }
+  const SÄTT = {
+    andel: "efter andelarna du angett", värde: "efter hur mycket varje innehav är värt idag",
+    lika: "lika mycket i varje aktie (du har inte angett andelar)", blandat: "efter dina andelar – aktier utan andel delar lika på resten",
+  };
+  const HZ = [[1, "1 år"], [3, "3 år"], [5, "5 år"], [10, "10 år"]];
+  const today = () => new Date().toLocaleDateString("sv-SE");
+  const shortDate = (iso) => { const d = new Date(iso + "T12:00:00"); return `${d.getDate()} ${MON[d.getMonth()]}`; };
+
   async function viewPortfolio(prefill) {
     setTop("Portfölj", `<button class="star" id="addbtn">+ Lägg till</button>`);
-    const me = { destroy: () => clearInterval(timer) }; let timer = null;
+    let timer = null;
+    const me = { destroy: () => clearInterval(timer) };
     current = me;
     const gone = () => current !== me;
     const sigs = {}, prices = {}, open = new Set();
-    let cands = [], advice = null, aiBusy = false;
-    view.innerHTML = `<div id="pform"></div><div id="psum"></div><div id="pai"></div><div id="plist"><div class="card"><div class="skeleton" style="height:120px"></div></div></div>
-      <p class="disclaimer">Underlag för egna beslut – inte finansiell rådgivning. Kurser i USD.</p>`;
+    let cands = [], advice = null, aiBusy = false, settings = { dagligAI: false }, tipsLog = null, updatedAt = null;
+    let hz = LS.get("portHz", 3), belopp = LS.get("portBelopp", "");
+    view.innerHTML = `<div id="pform"></div><div id="psum"></div><div id="plist"><div class="card"><div class="skeleton" style="height:120px"></div></div></div><div id="pai"></div>
+      <p class="disclaimer">Underlag för egna beslut – inte finansiell rådgivning.</p>`;
 
-    const rows = () => {
-      const val = (x) => x.antal * (prices[x.t] ?? (sigs[x.t] && sigs[x.t].pris) ?? x.gav);
-      const total = portfolio.reduce((s, x) => s + val(x), 0);
-      return { total, list: portfolio.map((x) => { const v = val(x); return { ...x, pris: v / x.antal, värde: v, vikt: total ? v / total : 0, vinst: v - x.antal * x.gav }; }) };
-    };
-    const freshAdvice = () => advice && !advice.saknas && advice.portfölj === portfolio.map((x) => `${x.t}:${x.antal}`).sort().join(",");
+    // Allt som räknas fram ur portföljen och de senaste kurserna
+    const priceOf = (t) => prices[t] ?? (sigs[t] && sigs[t].pris) ?? null;
+    function calc() {
+      const { w, sätt, summa } = weightsFor(portfolio, priceOf);
+      const list = portfolio.map((x, i) => {
+        const sig = sigs[x.t], h = (sig && sig.horisonter) || {}, pris = priceOf(x.t);
+        return { ...x, vikt: w[i], sig, pris, r: Object.fromEntries(HZ.map(([y]) => [y, h[y] ? h[y].årlig : null])),
+          värde: x.antal > 0 && pris ? x.antal * pris : null, vinst: x.antal > 0 && pris ? (pris - x.gav) * x.antal : null };
+      });
+      // Viktat snitt per år: Σ andel × förväntad avkastning. Aktier utan prognos räknas bort och resten vägs upp.
+      const sum = (y) => { let v = 0, ws = 0; list.forEach((x) => { if (x.r[y] != null) { v += x.vikt * x.r[y]; ws += x.vikt; } }); return ws ? { v: v / ws, täckning: ws } : null; };
+      return { list, sätt, summa, total: Object.fromEntries(HZ.map(([y]) => [y, sum(y)])) };
+    }
+    const tipsFor = (c) => Object.fromEntries(c.list.filter((x) => x.sig).map((x) => [x.t, ruleTip(x.sig, x.vikt).råd]));
+    const ref = () => tipsLog && (tipsLog.senast && tipsLog.senast.datum !== today() ? tipsLog.senast : tipsLog.förra);
 
-    function renderSummary() {
-      if (!portfolio.length) { $("#psum").innerHTML = ""; return; }
-      const { total, list } = rows();
-      const cost = portfolio.reduce((s, x) => s + x.antal * x.gav, 0), gain = total - cost;
-      const today = list.reduce((s, x) => { const i = sigs[x.t] && sigs[x.t].idag; return s + (i != null ? x.värde * (i / (1 + i)) : 0); }, 0);
-      const exp = list.reduce((s, x) => { const a = annual(sigs[x.t]); return a == null ? s : { v: s.v + a * x.vikt, w: s.w + x.vikt }; }, { v: 0, w: 0 });
-      $("#psum").innerHTML = `<div class="card"><h2>Din portfölj</h2>
-        <div class="price" style="font-size:30px">${num(total, 0)} <span class="small muted">USD</span></div>
-        <div class="grid" style="margin-top:10px">
-          <div><span>Sedan köp</span><b class="${cls(gain)}">${gain >= 0 ? "+" : "−"}${num(Math.abs(gain), 0)}</b><span class="${cls(gain)}">${pct(cost ? gain / cost : null, 1)}</span></div>
-          <div><span>Idag</span><b class="${cls(today)}">${today >= 0 ? "+" : "−"}${num(Math.abs(today), 0)}</b></div>
-          <div><span>Förväntat per år (3 år)</span><b class="${cls(exp.w ? exp.v / exp.w : null)}">${exp.w ? pct(exp.v / exp.w, 1) : "–"}</b></div>
-          <div><span>Innehav</span><b>${portfolio.length} st</b></div>
-        </div></div>`;
+    // Värdet om N år med portföljens förväntade avkastning per år (som om du behåller samma andelar)
+    function growHTML(c) {
+      const n = Number(String(belopp).replace(/\s/g, "").replace(",", ".")), tot = c.total[hz];
+      if (!(n > 0) || !tot) return "";
+      const g = (1 + tot.v) ** hz;
+      return `blir det ungefär <b>${num(n * g, 0)} kr</b> om ${hz} år (<span class="${cls(g - 1)}">${g >= 1 ? "+" : "−"}${num(Math.abs(n * (g - 1)), 0)} kr</span>), om prognoserna slår in.`;
     }
 
-    function renderList() {
+    function renderSummary(c) {
+      const el = $("#psum");
+      if (!portfolio.length) { el.innerHTML = ""; return; }
+      const tot = c.total[hz], loading = c.list.some((x) => !x.sig);
+      const rows = c.list.slice().sort((a, b) => b.vikt - a.vikt);
+      const withValue = c.list.filter((x) => x.värde != null);
+      const cost = withValue.reduce((s, x) => s + x.antal * x.gav, 0), val = withValue.reduce((s, x) => s + x.värde, 0);
+      el.innerHTML = `<div class="card"><h2>Förväntad avkastning per år</h2>
+        <div class="seg" id="hzseg" role="tablist" aria-label="Tidshorisont">${HZ.map(([y, l]) => `<button data-y="${y}" class="${y === hz ? "on" : ""}">${l}</button>`).join("")}</div>
+        <div class="big" style="margin:6px 0 0"><b class="${cls(tot && tot.v)}" style="white-space:nowrap">${tot ? pct(tot.v, 1) : "–"}</b><span class="muted">per år</span></div>
+        <p class="small muted" style="margin:0">${hz === 1 ? "Nästa 12 månader." : `I snitt de kommande ${hz} åren.`}</p>
+        <p class="small muted" style="margin:0 0 10px">Hela portföljen tillsammans, viktat ${SÄTT[c.sätt]}.${loading ? " Hämtar data …" : ""}</p>
+        ${c.sätt === "blandat" ? `<p class="small" style="color:var(--warn)">${c.summa >= 100 ? `Dina andelar blir redan ${num(c.summa, 0)} %, så aktier utan andel räknas som 0 %. Ange en andel för dem.` : `Aktier utan angiven andel delar lika på resterande ${num(100 - c.summa, 0)} %.`}</p>` : ""}
+        ${c.sätt === "andel" && Math.abs(c.summa - 100) > 0.5 ? `<p class="small" style="color:var(--warn)">Dina andelar blir ${num(c.summa, 0)} % tillsammans. Vi räknar som om de är 100 % (varje andel delas med ${num(c.summa, 0)}).</p>` : ""}
+        <h3>Så räknas det</h3>
+        <div class="calc" role="table" aria-label="Uträkning">
+          <div class="calc-h" role="row"><span>Aktie</span><span>Andel</span><span>Förväntat</span><span>Bidrag</span></div>
+          ${rows.map((x) => `<div role="row"><span><b>${esc(x.t)}</b></span><span>${pct(x.vikt, x.vikt * 100 % 1 ? 1 : 0, false)}</span>
+            <span class="${cls(x.r[hz])}">${x.sig ? pct(x.r[hz], 1) : "…"}</span><span>${x.r[hz] != null ? pct(x.vikt * x.r[hz], 2) : "–"}</span></div>`).join("")}
+          <div class="calc-s" role="row"><span>Summa</span><span>${pct(rows.reduce((s, x) => s + x.vikt, 0), 0, false)}</span><span></span><span class="${cls(tot && tot.v)}"><b>${tot ? pct(tot.v, 1) : "–"}</b></span></div>
+        </div>
+        <p class="tiny muted">Bidrag = andel × aktiens förväntade avkastning per år. Summan av bidragen är portföljens förväntade avkastning per år.
+          ${tot && tot.täckning < 0.999 ? `Aktier utan prognos (${pct(1 - tot.täckning, 0, false)} av portföljen) räknas inte med – resten vägs upp.` : ""}</p>
+        <div class="field" style="margin-top:12px"><label for="belopp">Om jag investerar (kr)</label><input id="belopp" type="text" inputmode="numeric" placeholder="t.ex. 10 000" value="${esc(belopp)}"></div>
+        <p class="small" id="growtxt">${growHTML(c)}</p>
+        ${withValue.length ? `<div class="grid" style="margin-top:10px"><div><span>Värde idag${withValue.length < c.list.length ? " (de med antal)" : ""}</span><b>${num(val, 0)} USD</b></div>
+          <div><span>Sedan köp</span><b class="${cls(val - cost)}">${pct(cost ? val / cost - 1 : null, 1)}</b></div></div>` : ""}
+      </div>`;
+      $("#hzseg").onclick = (e) => { const b = e.target.closest("button"); if (!b) return; hz = +b.dataset.y; LS.set("portHz", hz); renderSummary(calc()); };
+      $("#belopp").oninput = (e) => { belopp = e.target.value; LS.set("portBelopp", belopp); $("#growtxt").innerHTML = growHTML(calc()); };
+    }
+
+    function renderList(c) {
       const el = $("#plist");
       if (!portfolio.length) {
         el.innerHTML = `<div class="card empty"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v9l6.4 6.4"/></svg>
-          <p><b>Lägg in aktierna du äger</b></p><p class="small">Ange antal och vad du betalade. Du får tips om att köpa mer, behålla eller sälja – och vad du kan byta till för högre avkastning per år.</p>
+          <p><b>Lägg in aktierna du investerar i</b></p><p class="small">Ange hur stor del av dina pengar som ligger i varje aktie, t.ex. 50 % Nvidia, 25 % Micron. Du får dagliga tips om att köpa mer, behålla eller sälja – och portföljens förväntade avkastning per år.</p>
           <button class="btn" id="addfirst" style="margin-top:8px">Lägg till aktie</button></div>`;
         $("#addfirst").onclick = () => showForm();
         return;
       }
-      const { list } = rows(), owned = new Set(portfolio.map((x) => x.t)), fresh = freshAdvice();
-      el.innerHTML = `<div class="card"><h2>Innehav</h2>${list.sort((a, b) => b.värde - a.värde).map((x) => {
-        const sig = sigs[x.t], rule = sig ? ruleTip(sig, x.vikt) : null;
-        const ai = fresh ? advice.innehav.find((r) => r.t === x.t) : null;
-        const råd = ai ? ai.råd : rule && rule.råd;
-        const vp = x.vinst / (x.antal * x.gav);
-        const alts = sig && rule && /Sälj/.test(råd || "") ? betterAlternatives(sig, cands, owned) : [];
-        const h = (sig && sig.horisonter) || {};
-        const kv = (k, v) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`;
-        return `<details class="hold" data-t="${esc(x.t)}" ${open.has(x.t) ? "open" : ""}><summary class="row">
-            <div class="main"><b>${esc(x.t)}</b><span>${esc(x.namn || "")}</span><span>${num(x.antal, x.antal % 1 ? 2 : 0)} st · ${num(x.värde, 0)} USD · ${pct(x.vikt, 0, false)}</span></div>
-            <div class="side"><b class="${cls(vp)}">${pct(vp, 1)}</b><span class="small muted">sedan köp</span>
-              <div style="margin-top:3px">${råd ? `<span class="pill ${RAD_CLS[råd]}">${esc(råd)}</span>` : '<span class="spinner" style="width:14px;height:14px"></span>'}</div></div></summary>
-          <div class="holdbody">
-            ${kv("Kurs nu / köpkurs", `${num(x.pris)} / ${num(x.gav)}`)}
-            ${kv("Vinst eller förlust", `<span class="${cls(x.vinst)}">${x.vinst >= 0 ? "+" : "−"}${num(Math.abs(x.vinst), 0)} USD</span>`)}
-            ${sig ? kv("Förväntat per år, 3 / 10 år", `${pct(h[3] && h[3].årlig, 0)} / ${pct(h[10] && h[10].årlig, 0)}`) : ""}
-            ${sig && sig.värdering ? kv("Värdering", esc(sig.värdering.läge)) : ""}
-            ${sig && sig.hype ? kv("Hype", `${sig.hype.poäng}/100 · ${esc(sig.hype.nivå)}`) : ""}
-            ${sig ? kv("Analysens poäng", `${sig.poäng}/100`) : ""}
-            ${ai ? `<div class="callout"><b>AI: ${esc(ai.råd)}.</b> ${esc(ai.kort)} <span class="small">${esc(ai.motivering)}</span></div>` : ""}
-            ${rule ? `<p class="small" style="margin:10px 0 4px"><b>Snabbregeln säger: ${esc(rule.råd)}</b></p><ul class="pts small">${rule.skäl.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>` : ""}
-            ${(ai && ai.alternativ.length) || alts.length ? `<h3>Bättre alternativ</h3>${(ai && ai.alternativ.length ? ai.alternativ.map((a) => {
-                const c = cands.find((k) => k.t === a.t) || (advice.kandidater || []).map((k) => ({ t: k.ticker, namn: k.namn, årlig_3år: k.per_år_3år, förväntad: k.förväntad_1år })).find((k) => k.t === a.t) || { t: a.t };
-                return { ...c, varför: a.varför };
-              }) : alts).map((c) => `<a class="row" href="#/aktie/${encodeURIComponent(c.t)}"><div class="main"><b>${esc(c.t)}</b><span>${esc(c.varför || c.namn || "")}</span></div>
-                <div class="side"><b class="${cls(candAnnual(c))}">${pct(candAnnual(c), 0)}</b><span class="small muted">${c.årlig_3år != null ? "per år" : "12 mån"}</span></div></a>`).join("")}` : ""}
-            <div class="btnrow"><a class="btn sec" href="#/aktie/${encodeURIComponent(x.t)}">Öppna aktien</a><button class="btn sec" data-edit="${esc(x.t)}">Ändra</button><button class="btn sec" data-del="${esc(x.t)}">Ta bort</button></div>
-          </div></details>`;
-      }).join("")}</div>`;
+      const owned = new Set(portfolio.map((x) => x.t)), r0 = ref(), fresh = freshAdvice();
+      const tips = c.list.map((x) => ({ x, tip: x.sig ? ruleTip(x.sig, x.vikt) : null }));
+      const changed = r0 ? tips.filter(({ x, tip }) => tip && r0.tips[x.t] && r0.tips[x.t] !== tip.råd) : [];
+      const tm = updatedAt ? updatedAt.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" }) : null;
+      el.innerHTML = `<div class="card"><h2>Dagens tips</h2>
+        <p class="small muted" style="margin:-4px 0 6px">${tm ? `<span class="live"></span>Uppdaterat idag ${tm} med dagens kurser och nyckeltal. ` : ""}Räknas om varje gång du öppnar appen och varje minut.</p>
+        ${r0 ? `<p class="small" style="margin:0 0 6px">${changed.length ? `<b>${changed.length} ${changed.length === 1 ? "tips har" : "tips har"} ändrats</b> sedan ${shortDate(r0.datum)}.` : `Inga tips har ändrats sedan ${shortDate(r0.datum)}.`}</p>` : ""}
+        ${tips.sort((a, b) => b.x.vikt - a.x.vikt).map(({ x, tip }) => {
+          const was = r0 && tip && r0.tips[x.t] && r0.tips[x.t] !== tip.råd ? r0.tips[x.t] : null;
+          const ai = fresh ? advice.innehav.find((r) => r.t === x.t) : null;
+          const alts = tip && /Sälj/.test(tip.råd) ? betterAlternatives(x.sig, cands, owned) : [];
+          const kv = (k, v) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`;
+          return `<details class="hold" data-t="${esc(x.t)}" ${open.has(x.t) ? "open" : ""}><summary class="row">
+              <div class="main"><b>${esc(x.t)}</b><span>${esc(x.namn || "")}</span><span>${pct(x.vikt, 0, false)} av portföljen${x.r[3] != null ? ` · väntas ${pct(x.r[3], 0)}/år` : ""}</span></div>
+              <div class="side">${tip ? `<span class="pill ${RAD_CLS[tip.råd]}">${esc(tip.råd)}</span>` : '<span class="spinner" style="width:14px;height:14px"></span>'}
+                ${was ? `<span class="tiny" style="display:block;margin-top:4px;color:var(--warn)">Ändrat · var ${esc(was)}</span>` : ""}</div></summary>
+            <div class="holdbody">
+              ${x.sig ? kv("Kurs nu", `${num(x.pris)} ${esc(x.sig.valuta || "")}`) : ""}
+              ${x.antal > 0 ? kv("Antal / köpkurs", `${num(x.antal, x.antal % 1 ? 2 : 0)} st / ${num(x.gav)}`) + kv("Sedan köp", x.pris ? `<span class="${cls(x.vinst)}">${pct(x.pris / x.gav - 1, 1)}</span>` : "–") : ""}
+              ${x.sig ? kv("Väntat per år (1 / 3 / 10 år)", `${pct(x.r[1], 0)} / ${pct(x.r[3], 0)} / ${pct(x.r[10], 0)}`) : ""}
+              ${x.sig && x.sig.värdering ? kv("Värdering", esc(x.sig.värdering.läge)) : ""}
+              ${x.sig && x.sig.hype ? kv("Hype", `${x.sig.hype.poäng}/100 · ${esc(x.sig.hype.nivå)}`) : ""}
+              ${tip ? `<p class="small" style="margin:10px 0 4px"><b>Varför ${esc(tip.råd.toLowerCase())}?</b></p><ul class="pts small">${tip.skäl.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>` : ""}
+              ${ai ? `<div class="callout"><b>AI-genomgången ${esc(ago(advice.skapad))}: ${esc(ai.råd)}.</b> ${esc(ai.kort)} <span class="small">${esc(ai.motivering)}</span></div>` : ""}
+              ${(ai && ai.alternativ.length) || alts.length ? `<h3>Bättre att investera i istället</h3>${(ai && ai.alternativ.length ? ai.alternativ.map((a) => ({ ...(cands.find((k) => k.t === a.t) || { t: a.t }), varför: a.varför })) : alts)
+                .map((k) => `<a class="row" href="#/aktie/${encodeURIComponent(k.t)}"><div class="main"><b>${esc(k.t)}</b><span>${esc(k.varför || k.namn || "")}</span></div>
+                  <div class="side"><b class="${cls(candAnnual(k))}">${pct(candAnnual(k), 0)}</b><span class="small muted">${k.årlig_3år != null ? "per år" : "12 mån"}</span></div></a>`).join("")}` : ""}
+              <div class="btnrow"><a class="btn sec" href="#/aktie/${encodeURIComponent(x.t)}">Öppna</a><button class="btn sec" data-edit="${esc(x.t)}">Ändra</button><button class="btn sec" data-del="${esc(x.t)}">Ta bort</button></div>
+            </div></details>`;
+        }).join("")}
+        <p class="tiny muted" style="margin-top:8px">Tipsen bygger på förväntad avkastning per år, värdering, hype och hur stor del av portföljen aktien är. Tryck på en aktie för att se varför.</p></div>`;
       el.querySelectorAll("details.hold").forEach((d) => d.addEventListener("toggle", () => (d.open ? open.add(d.dataset.t) : open.delete(d.dataset.t))));
       el.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => showForm(portfolio.find((x) => x.t === b.dataset.edit))));
       el.querySelectorAll("[data-del]").forEach((b) => (b.onclick = async () => {
@@ -936,53 +1035,66 @@
       }));
     }
 
+    const freshAdvice = () => advice && !advice.saknas && advice.portfölj === portfolio.map((x) => `${x.t}:${x.andel ?? ""}:${x.antal ?? ""}`).sort().join(",");
     function renderAI() {
       const el = $("#pai");
       if (!portfolio.length) { el.innerHTML = ""; return; }
-      if (aiBusy) { el.innerHTML = `<div class="card"><h2>AI-råd för portföljen</h2><p class="small muted" style="display:flex;gap:10px;align-items:center"><span class="spinner" style="flex-shrink:0"></span>AI:n går igenom dina innehav och jämför med topplistorna. Tar 20–60 sekunder.</p></div>`; return; }
-      if (!advice || advice.saknas) {
-        el.innerHTML = `<div class="card"><h2>AI-råd för portföljen</h2>
-          <p class="small muted">AI:n går igenom hela portföljen: vad du bör köpa mer av, behålla eller sälja, och vilka aktier ur topplistorna du kan byta till för högre avkastning per år. Kostar ungefär 1 kr.</p>
-          <button class="btn" id="runadv">Få AI-råd</button></div>`;
-      } else {
-        const stale = !freshAdvice();
-        el.innerHTML = `<div class="card"><h2>AI-råd för portföljen</h2>
-          ${stale ? `<p class="small" style="color:var(--warn)">Portföljen har ändrats sedan rådet gavs. Gör ett nytt för att få med ändringarna.</p>` : ""}
+      const toggle = `<label class="switch"><span>Daglig AI-genomgång<br><span class="small muted">Varje vardagskväll efter börsens stängning. Ungefär 1 kr per gång (cirka 20 kr i månaden).</span></span>
+        <input type="checkbox" id="dagligai" ${settings.dagligAI ? "checked" : ""}></label>`;
+      let body;
+      if (aiBusy) body = `<p class="small muted" style="display:flex;gap:10px;align-items:center"><span class="spinner" style="flex-shrink:0"></span>AI:n går igenom dina innehav och jämför med topplistorna. Tar 20–60 sekunder.</p>`;
+      else if (!advice || advice.saknas) body = `<p class="small muted">AI:n går igenom hela portföljen: vad du bör köpa mer av, behålla eller sälja, och vilka aktier ur topplistorna du kan byta till för högre avkastning per år.</p>
+        <button class="btn" id="runadv">Gör en AI-genomgång nu (ca 1 kr)</button>`;
+      else {
+        const stale = !freshAdvice(), old = Date.now() - advice.skapad > 36 * 3600e3;
+        body = `${stale ? `<p class="small" style="color:var(--warn)">Portföljen har ändrats sedan genomgången. Gör en ny för att få med ändringarna.</p>` : old ? `<p class="small" style="color:var(--warn)">Genomgången är ${esc(ago(advice.skapad))} gammal.</p>` : ""}
           <p>${esc(advice.sammanfattning)}</p>
           ${advice.före != null && advice.efter != null ? `<div class="grid" style="margin:8px 0"><div><span>Förväntat per år nu</span><b>${pct(advice.före, 1)}</b></div><div><span>Om du följer råden</span><b class="${cls(advice.efter - advice.före)}">${pct(advice.efter, 1)}</b></div></div>` : ""}
           ${advice.innehav.map((r) => `<div class="row" style="align-items:flex-start"><div class="main"><b>${esc(r.t)}</b><span style="white-space:normal">${esc(r.kort)}</span>
             ${r.alternativ.length ? `<span style="white-space:normal">Byt till: ${r.alternativ.map((a) => `<a href="#/aktie/${encodeURIComponent(a.t)}">${esc(a.t)}</a>`).join(", ")}</span>` : ""}</div>
             <div class="side"><span class="pill ${RAD_CLS[r.råd]}">${esc(r.råd)}</span></div></div>`).join("")}
           ${advice.att_tänka_på && advice.att_tänka_på.length ? `<h3>Att tänka på</h3><ul class="pts small">${advice.att_tänka_på.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
-          <p class="tiny muted" style="margin:10px 0">Gjort ${esc(ago(advice.skapad))}. Tryck på ett innehav nedan för motiveringen.</p>
-          <button class="btn sec" id="runadv">Gör ett nytt AI-råd</button></div>`;
+          <p class="tiny muted" style="margin:10px 0">${advice.automatisk ? "Automatisk genomgång" : "Gjord"} ${esc(ago(advice.skapad))}.</p>
+          <button class="btn sec" id="runadv">Gör en ny genomgång (ca 1 kr)</button>`;
       }
-      $("#runadv").onclick = async () => {
+      el.innerHTML = `<div class="card"><h2>AI-genomgång av portföljen</h2>${body}<div style="margin-top:12px;border-top:1px solid var(--line)">${toggle}</div></div>`;
+      $("#dagligai").onchange = async (e) => {
+        try { settings = await api("/api/portfolio/settings", { method: "POST", body: { dagligAI: e.target.checked } }); toast(settings.dagligAI ? "Daglig AI-genomgång på" : "Daglig AI-genomgång av"); }
+        catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
+      };
+      const b = $("#runadv");
+      if (b) b.onclick = async () => {
         aiBusy = true; renderAI();
-        try {
-          advice = await api("/api/portfolio/advice", { method: "POST", body: { signaler: Object.values(sigs), kandidater: cands } });
-        } catch (e) { toast(e.message); }
+        try { advice = await api("/api/portfolio/advice", { method: "POST", body: { signaler: Object.values(sigs), kandidater: cands } }); }
+        catch (e) { toast(e.message); }
         aiBusy = false;
         if (!gone()) renderAll();
       };
     }
 
-    function renderAll() { renderSummary(); renderAI(); renderList(); }
+    function renderAll() { const c = calc(); renderSummary(c); renderList(c); renderAI(); }
 
-    // Formulär för att lägga till eller ändra ett innehav
+    // Formulär: andel i procent (huvudsaken), antal och köpkurs om man vill följa vinsten
     function showForm(edit, t0) {
       const f = $("#pform");
       let pick = edit ? { t: edit.t, namn: edit.namn } : t0 ? { t: t0, namn: t0 } : null;
+      const used = portfolio.filter((x) => !edit || x.t !== edit.t).reduce((s, x) => s + (x.andel || 0), 0);
       f.innerHTML = `<div class="card"><h2>${edit ? `Ändra ${esc(edit.t)}` : "Lägg till aktie"}</h2>
         ${edit ? "" : `<div class="field"><label for="pq">Aktie</label><input id="pq" type="search" placeholder="Sök bolag eller ticker" autocomplete="off" autocapitalize="characters" value="${esc(t0 || "")}"></div><div id="psug"></div>`}
-        <div class="field"><label for="pantal">Antal aktier</label><input id="pantal" type="number" inputmode="decimal" min="0" step="any" value="${edit ? esc(edit.antal) : ""}"></div>
-        <div class="field"><label for="pgav">Köpkurs per aktie (USD)</label><input id="pgav" type="number" inputmode="decimal" min="0" step="any" value="${edit ? esc(edit.gav) : ""}" placeholder="Snittpriset du betalade"></div>
+        <div class="field"><label for="pandel">Andel av portföljen (%)</label><input id="pandel" type="number" inputmode="decimal" min="0" max="100" step="any" value="${edit && edit.andel != null ? esc(edit.andel) : ""}" placeholder="${used > 0 && used < 100 ? `t.ex. ${num(100 - used, 0)} (${num(100 - used, 0)} % kvar)` : "t.ex. 25"}">
+          <p class="tiny muted" style="margin:4px 0 0">Hur stor del av pengarna du har (eller vill ha) i aktien. ${used > 0 ? `Dina andra aktier har ${num(used, 0)} %.` : ""}</p></div>
+        <details ${edit && edit.antal ? "open" : ""}><summary>Antal aktier och köpkurs (valfritt)</summary>
+          <p class="tiny muted">Fyll i om du vill följa din vinst eller förlust.</p>
+          <div class="field"><label for="pantal">Antal aktier</label><input id="pantal" type="number" inputmode="decimal" min="0" step="any" value="${edit && edit.antal != null ? esc(edit.antal) : ""}"></div>
+          <div class="field"><label for="pgav">Köpkurs per aktie (USD)</label><input id="pgav" type="number" inputmode="decimal" min="0" step="any" value="${edit && edit.gav != null ? esc(edit.gav) : ""}" placeholder="Snittpriset du betalade"></div>
+        </details>
         <div class="btnrow"><button class="btn" id="psave">Spara</button><button class="btn sec" id="pcancel">Avbryt</button></div></div>`;
       f.scrollIntoView({ behavior: "smooth", block: "start" });
       $("#pcancel").onclick = () => { f.innerHTML = ""; };
+      const showPrice = (s) => { sigs[s.t] = s; $("#pgav").placeholder = `Kurs nu: ${num(s.pris)}`; };
       if (!edit) {
         const q = $("#pq"), sug = $("#psug"); let tm, seq = 0;
-        const search = () => {
+        q.addEventListener("input", () => {
           clearTimeout(tm); pick = null;
           const v = q.value.trim(); if (!v) { sug.innerHTML = ""; return; }
           tm = setTimeout(async () => {
@@ -992,57 +1104,72 @@
               sug.innerHTML = d.results.slice(0, 5).map((x) => `<button class="row sugg" data-t="${esc(x.t)}" data-n="${esc(x.namn)}"><div class="main"><b>${esc(x.t)}</b><span>${esc(x.namn)}${x.börs ? " · " + esc(x.börs) : ""}</span></div></button>`).join("");
             } catch (e) { sug.innerHTML = `<p class="small muted">${esc(e.message)}</p>`; }
           }, 300);
-        };
-        q.addEventListener("input", search);
-        sug.onclick = async (e) => {
+        });
+        sug.onclick = (e) => {
           const b = e.target.closest("button[data-t]"); if (!b) return;
           pick = { t: b.dataset.t, namn: b.dataset.n }; q.value = `${pick.t} – ${pick.namn}`; sug.innerHTML = "";
-          if (!$("#pgav").value) { try { const s = await api("/api/signal?t=" + encodeURIComponent(pick.t)); if (s.pris && !$("#pgav").value) $("#pgav").placeholder = `Kurs nu: ${num(s.pris)}`; sigs[s.t] = s; } catch {} }
-          $("#pantal").focus();
+          api("/api/signal?t=" + encodeURIComponent(pick.t)).then(showPrice).catch(() => {});
+          $("#pandel").focus();
         };
-        if (t0) { pick = { t: t0, namn: t0 }; api("/api/signal?t=" + encodeURIComponent(t0)).then((s) => { pick.namn = s.namn; q.value = `${s.t} – ${s.namn}`; sigs[s.t] = s; $("#pgav").placeholder = `Kurs nu: ${num(s.pris)}`; }).catch(() => {}); }
+        if (t0) api("/api/signal?t=" + encodeURIComponent(t0)).then((s) => { if (pick) pick.namn = s.namn; q.value = `${s.t} – ${s.namn}`; showPrice(s); }).catch(() => {});
         else setTimeout(() => q.focus(), 300);
       }
       $("#psave").onclick = async () => {
         if (!pick) { toast("Välj en aktie i listan."); return; }
-        const antal = parseFloat(String($("#pantal").value).replace(",", ".")), gav = parseFloat(String($("#pgav").value).replace(",", "."));
-        if (!(antal > 0)) { toast("Ange antal aktier."); return; }
-        if (!(gav > 0)) { toast("Ange köpkursen."); return; }
+        const val = (id) => { const v = String($(id).value).trim().replace(",", "."); return v === "" ? null : parseFloat(v); };
+        const andel = val("#pandel"), antal = val("#pantal"), gav = val("#pgav");
+        if (andel == null && antal == null) { toast("Ange andelen i procent (eller antal och köpkurs)."); return; }
+        if (andel != null && !(andel > 0 && andel <= 100)) { toast("Andelen ska vara mellan 0 och 100 %."); return; }
+        if ((antal == null) !== (gav == null)) { toast("Fyll i både antal och köpkurs, eller inget av dem."); return; }
         const b = $("#psave"); b.disabled = true;
         try {
-          portfolio = await api("/api/portfolio", { method: "POST", body: { action: "set", t: pick.t, namn: pick.namn, antal, gav } });
+          portfolio = await api("/api/portfolio", { method: "POST", body: { action: "set", t: pick.t, namn: pick.namn, andel, antal, gav } });
           LS.set("portCache", portfolio);
           f.innerHTML = ""; toast(`${pick.t} sparad`);
           await loadSignals([pick.t]);
-          renderAll();
+          if (gone()) return;
+          renderAll(); saveTips();
         } catch (e) { toast(e.message); b.disabled = false; }
       };
     }
     $("#addbtn").onclick = () => showForm();
 
-    // Hämta signal för varje innehav, fyra åt gången
+    // Signal för varje innehav, fyra åt gången
     async function loadSignals(ts) {
       const queue = ts.filter((t) => !sigs[t]);
-      const worker = async () => { while (queue.length) { const t = queue.shift(); try { sigs[t] = await api("/api/signal?t=" + encodeURIComponent(t)); } catch {} if (!gone()) renderAll(); } };
-      await Promise.all([worker(), worker(), worker(), worker()]);
+      const work = async () => { while (queue.length) { const t = queue.shift(); try { sigs[t] = await api("/api/signal?t=" + encodeURIComponent(t)); } catch {} if (!gone()) renderAll(); } };
+      await Promise.all([work(), work(), work(), work()]);
+      updatedAt = new Date();
+    }
+    // Spara dagens tips en gång per dag, så att appen i morgon kan visa vad som ändrats
+    async function saveTips() {
+      const c = calc(), tips = tipsFor(c);
+      if (!Object.keys(tips).length) return; // sparar de aktier som gick att hämta
+      // Servern flyttar gårdagens tips till "förra" när ett nytt datum sparas
+      try { tipsLog = await api("/api/portfolio/tips", { method: "POST", body: { datum: today(), tips } }); } catch {}
     }
     const refresh = async () => {
       if (document.hidden || gone() || !portfolio.length) return;
       try {
         const q = await api("/api/quotes?symbols=" + portfolio.map((x) => encodeURIComponent(x.t)).join(","));
-        q.quotes.forEach((x) => { if (x.pris > 0) { prices[x.t] = x.pris; if (sigs[x.t]) sigs[x.t].idag = x.idag; } });
-        if (!gone()) { renderSummary(); renderList(); }
+        q.quotes.forEach((x) => { if (x.pris > 0) prices[x.t] = x.pris; });
+        updatedAt = new Date();
+        if (!gone()) { const c = calc(); renderSummary(c); renderList(c); }
       } catch {}
     };
 
     renderAll();
     try {
-      const [, c, a] = await Promise.all([loadPortfolio(), loadCandidates(), api("/api/portfolio/advice").catch(() => null)]);
+      const [, c, a, st, tl] = await Promise.all([loadPortfolio(), loadCandidates(), api("/api/portfolio/advice").catch(() => null),
+        api("/api/portfolio/settings").catch(() => settings), api("/api/portfolio/tips").catch(() => null)]);
       if (gone()) return;
-      cands = c; advice = a;
+      cands = c; advice = a; settings = st; tipsLog = tl && tl.senast ? tl : null;
       renderAll();
       if (prefill) showForm(portfolio.find((x) => x.t === prefill), portfolio.some((x) => x.t === prefill) ? null : prefill);
       await loadSignals(portfolio.map((x) => x.t));
+      if (gone()) return;
+      renderAll();
+      saveTips();
       timer = setInterval(refresh, 60000);
     } catch (e) { toast(e.message); }
   }

@@ -220,7 +220,7 @@ await test("AI-råd för portföljen: bara alternativ ur listan, bara egna inneh
   assert.ok(!globalThis.lastAdvicePrompt.includes("<x>"), "ogiltig ticker skickas inte till AI:n");
   assert.ok(globalThis.lastAdvicePrompt.includes("\"andel\""));
   const g = await (await call(env, "/api/portfolio/advice")).json();
-  assert.equal(g.portfölj, "MU:20,NVDA:10");
+  assert.equal(g.portfölj, "MU::20,NVDA::10");
 });
 
 await test("AI-råd: svarar AI:n med text först så frågar vi igen", async () => {
@@ -229,6 +229,61 @@ await test("AI-råd: svarar AI:n med text först så frågar vi igen", async () 
   await call(env, "/api/portfolio", { method: "POST", body: { action: "set", t: "NVDA", antal: 1, gav: 100 } });
   const a = await (await call(env, "/api/portfolio/advice", { method: "POST", body: {} })).json();
   assert.ok(a.sammanfattning.length > 0);
+});
+
+await test("portfölj med andelar i procent: sparas, valideras, vägs rätt", async () => {
+  installMocks();
+  const env = makeEnv();
+  for (const [t, andel] of [["NVDA", 50], ["MU", 25], ["AVGO", 15], ["AAPL", 10]]) {
+    const r = await call(env, "/api/portfolio", { method: "POST", body: { action: "set", t, andel } });
+    assert.equal(r.status, 200, t);
+  }
+  const l = await (await call(env, "/api/portfolio")).json();
+  assert.deepEqual(l.map((x) => x.andel), [50, 25, 15, 10]);
+  assert.equal(l[0].antal, null);
+  assert.equal((await call(env, "/api/portfolio", { method: "POST", body: { action: "set", t: "MSFT", andel: 120 } })).status, 400, "över 100 %");
+  assert.equal((await call(env, "/api/portfolio", { method: "POST", body: { action: "set", t: "MSFT" } })).status, 400, "varken andel eller antal");
+  assert.equal((await call(env, "/api/portfolio", { method: "POST", body: { action: "set", t: "MSFT", antal: 5 } })).status, 400, "antal utan köpkurs");
+  // AI-rådet får rätt andelar och en exakt viktad förväntad avkastning
+  const sigs = [];
+  for (const t of ["NVDA", "MU", "AVGO", "AAPL"]) sigs.push(await (await call(env, "/api/signal?t=" + t)).json());
+  const a = await (await call(env, "/api/portfolio/advice", { method: "POST", body: { signaler: sigs } })).json();
+  const r3 = sigs.map((x) => x.horisonter["3"].årlig);
+  const väntat = 0.5 * r3[0] + 0.25 * r3[1] + 0.15 * r3[2] + 0.1 * r3[3];
+  assert.ok(Math.abs(a.före - väntat) < 1e-9, `före ${a.före} väntat ${väntat}`);
+  assert.ok(globalThis.lastAdvicePrompt.includes('"andel":0.5'));
+});
+
+await test("vikter: andelar, marknadsvärde, lika, blandat", async () => {
+  const { weightsFor } = await import("../src/index.js");
+  const close = (a, b) => a.every((x, i) => Math.abs(x - b[i]) < 1e-12);
+  let r = weightsFor([{ andel: 50 }, { andel: 25 }, { andel: 15 }, { andel: 10 }]);
+  assert.equal(r.sätt, "andel"); assert.ok(close(r.w, [0.5, 0.25, 0.15, 0.1]));
+  r = weightsFor([{ andel: 40 }, { andel: 50 }]); // summerar till 90: räknas om till 100
+  assert.ok(close(r.w, [4 / 9, 5 / 9])); assert.equal(r.summa, 90);
+  r = weightsFor([{ t: "A", antal: 10 }, { t: "B", antal: 10 }], (t) => (t === "A" ? 30 : 10));
+  assert.equal(r.sätt, "värde"); assert.ok(close(r.w, [0.75, 0.25]));
+  r = weightsFor([{}, {}, {}, {}]); assert.equal(r.sätt, "lika"); assert.ok(close(r.w, [0.25, 0.25, 0.25, 0.25]));
+  r = weightsFor([{ andel: 60 }, { antal: 3 }, {}]); // 60 % + resten (40 %) delas lika
+  assert.equal(r.sätt, "blandat"); assert.ok(close(r.w, [0.6, 0.2, 0.2]));
+});
+
+await test("dagens tips sparas och gårdagens finns kvar att jämföra med", async () => {
+  const env = makeEnv();
+  await call(env, "/api/portfolio/tips", { method: "POST", body: { datum: "2026-10-06", tips: { NVDA: "Behåll", MU: "Köp mer", "<x>": "Sälj", AAPL: "Kanske" } } });
+  await call(env, "/api/portfolio/tips", { method: "POST", body: { datum: "2026-10-07", tips: { NVDA: "Sälj delvis" } } });
+  let d = await (await call(env, "/api/portfolio/tips", { method: "POST", body: { datum: "2026-10-07", tips: { NVDA: "Sälj" } } })).json();
+  assert.equal(d.förra.datum, "2026-10-06");
+  assert.deepEqual(d.förra.tips, { NVDA: "Behåll", MU: "Köp mer" }, "ogiltiga tips och tickers sparas inte");
+  assert.deepEqual(d.senast.tips, { NVDA: "Sälj" });
+  assert.equal((await call(env, "/api/portfolio/tips", { method: "POST", body: { datum: "igår" } })).status, 400);
+});
+
+await test("inställning för daglig AI-genomgång", async () => {
+  const env = makeEnv();
+  assert.equal((await (await call(env, "/api/portfolio/settings")).json()).dagligAI, false);
+  await call(env, "/api/portfolio/settings", { method: "POST", body: { dagligAI: true } });
+  assert.equal((await (await call(env, "/api/portfolio/settings")).json()).dagligAI, true);
 });
 
 console.log(failed ? `\n${failed} test misslyckades` : "\nAlla test gick igenom");
