@@ -25,7 +25,7 @@ jobs:
           python3 - <<'PY'
           import json, os, re, urllib.request, urllib.error
           url = re.search(r'workerUrl:\s*"([^"]+)"', open("docs/config.js").read()).group(1)
-          req = urllib.request.Request(f"{url}/api/stock?t={os.environ['T']}", headers={"X-App-Key": os.environ["APP_KEY"]})
+          req = urllib.request.Request(f"{url}/api/stock?t={os.environ['T']}", headers={"X-App-Key": os.environ["APP_KEY"], "User-Agent": "aktieagent-kontroll"})
           try:
               d = json.load(urllib.request.urlopen(req, timeout=60))
           except urllib.error.HTTPError as e:
