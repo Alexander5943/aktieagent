@@ -13,7 +13,11 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#f4f5f7" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0e1014" media="(prefers-color-scheme: dark)">
-<link rel="stylesheet" href="app.css">
+<script>
+  // Hämta alltid senaste versionen av appen (telefonen sparar annars gamla filer)
+  window.APP_V = Date.now();
+  document.write('<link rel="stylesheet" href="app.css?v=' + window.APP_V + '">');
+</script>
 </head>
 <body>
 <header class="top"><h1 id="title">Aktier</h1><div id="topaction"></div></header>
@@ -29,6 +33,6 @@
 <div id="tip" role="tooltip"></div>
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
-<script src="app.js"></script>
+<script>document.write('<script src="app.js?v=' + window.APP_V + '"><\/script>');</script>
 </body>
 </html>

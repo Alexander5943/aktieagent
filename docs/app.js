@@ -563,6 +563,12 @@
         <div class="tiny muted" id="liveinfo"></div>
         <div class="small" style="margin-top:6px">${(() => { const h = portfolio.find((x) => x.t === t); return h ? `I din portfölj${h.andel ? ` (${num(h.andel, 0)} %)` : h.antal ? ` (${num(h.antal, h.antal % 1 ? 2 : 0)} st)` : ""} · <a href="#/portfolj">Se dagens tips</a>` : `<a href="#/portfolj/ny/${encodeURIComponent(t)}">+ Lägg till i portföljen</a>`; })()}</div>
       </div>
+      <div class="quick" id="quick">${(() => {
+        const v = s.värdering, b = s.ägarbetyg, chip = (label, val, c, sec) => `<button class="qchip" data-sec="${sec}"><span>${label}</span><b class="pill ${c}">${esc(val)}</b></button>`;
+        return [v ? chip("Värdering", v.läge.replace("Kraftigt ", "Mycket "), lägeCls(v.läge), "sec-varde") : "",
+          b ? chip("Ägarbetyg", b.betyg, { Bra: "buy", Neutral: "neutral", Dålig: "avoid" }[b.betyg], "sec-agare") : "",
+          `<span id="qai"></span>`].join("");
+      })()}</div>
       <nav class="jump" id="jump" aria-label="Hoppa till">${sections.map(([id, l]) => `<button data-sec="${id}">${l}</button>`).join("")}</nav>
       <div class="card" style="padding-top:8px" id="sec-chart">
         <div class="ranges" id="ranges">${RANGES.map(([l], i) => `<button data-i="${i}" class="${i === 3 ? "on" : ""}">${l}</button>`).join("")}</div>
@@ -600,6 +606,7 @@
       <p class="disclaimer">Underlag för egen analys – inte finansiell rådgivning. Data: Yahoo Finance.</p>`;
 
     framtidBox(t);
+    $("#quick").onclick = (e) => { const b = e.target.closest("button[data-sec]"); const el = b && document.getElementById(b.dataset.sec); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
     $("#jump").onclick = (e) => { const b = e.target.closest("button"); const el = b && document.getElementById(b.dataset.sec); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
 
     // Stjärna
@@ -696,6 +703,7 @@
     // AI-del
     const showAI = (a) => {
       $("#aiwrap").innerHTML = aiCard(a, s);
+      if ($("#qai")) $("#qai").outerHTML = a && !a.saknas ? `<button class="qchip" id="qai" data-sec="sec-ai"><span>AI</span><b class="pill ${pillCls(a.betyg)}">${esc(a.betyg)}</b></button>` : `<span id="qai"></span>`;
       if ($("#aibolag")) $("#aibolag").innerHTML = aiBolag(a);
       const b = $("#runai"); if (b) b.onclick = () => runAI(true);
     };

@@ -252,3 +252,9 @@ ul.pm{list-style:none;margin:4px 0;padding:0}
 ul.pm li{display:grid;grid-template-columns:18px 1fr;gap:4px;font-size:14px;margin:5px 0}
 ul.pm li span{font-weight:800;text-align:center}
 ul.pm.plus li span{color:var(--up)} ul.pm.minus li span{color:var(--down)}
+
+/* Snabbomdömen under kursen */
+.quick{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 2px}
+.qchip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:4px 4px 4px 12px;cursor:pointer;min-height:40px}
+.qchip span{font-size:13px;color:var(--muted);font-weight:600}
+.qchip .pill{font-size:13px}

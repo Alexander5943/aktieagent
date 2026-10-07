@@ -336,7 +336,7 @@ async function macroSeries(ctx) {
 }
 
 async function stock(t, env, ctx) {
-  return cached("stock2:" + t, 1800, ctx, async () => {
+  return cached("stock3:" + t, 1800, ctx, async () => {
     const [ch, qs, fin, nw, ms] = await Promise.all([chart(t, "10y"), quoteSummary(t, env), financials(t), news(t), macroSeries(ctx).catch(() => ({}))]);
     const f = fundamentals(qs);
     const tech = technicals(ch.rows);
