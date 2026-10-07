@@ -23,10 +23,15 @@ jobs:
           T: ${{ inputs.ticker }}
         run: |
           python3 - <<'PY'
-          import json, os, re, urllib.request
+          import json, os, re, urllib.request, urllib.error
           url = re.search(r'workerUrl:\s*"([^"]+)"', open("docs/config.js").read()).group(1)
           req = urllib.request.Request(f"{url}/api/stock?t={os.environ['T']}", headers={"X-App-Key": os.environ["APP_KEY"]})
-          d = json.load(urllib.request.urlopen(req, timeout=60))
+          try:
+              d = json.load(urllib.request.urlopen(req, timeout=60))
+          except urllib.error.HTTPError as e:
+              print(f"::error title=Servern svarade {e.code}::{e.read().decode()[:500]}"); raise SystemExit(1)
+          except Exception as e:
+              print(f"::error title=Ingen kontakt::{e}"); raise SystemExit(1)
           ä = (d.get("nyckeltal") or {}).get("ägare")
           print(f"::notice title=Nyckeltal::{'finns' if d.get('nyckeltal') else 'SAKNAS'}")
           print(f"::notice title=Ägare::{json.dumps({k: v for k, v in (ä or {}).items() if k != 'största'}, ensure_ascii=False)}")
