@@ -24,15 +24,15 @@ const num = (x) => (x != null && isFinite(x) ? x : null);
 export const M = {
   slutTillvaxt: 0.04,  // långsiktig tillväxt när bolaget mognat
   avtagande: 0.65,     // hur fort tillväxten avtar mot slutTillvaxt per år
-  peAterg: 0.7,        // andel av "för högt/lågt" P/E som finns kvar efter ett år
+  peAterg: 0.75,       // andel av "för högt/lågt" P/E som finns kvar efter ett år
   avkastningskrav: 0.09,
 };
 
 export function qualityPremium(f) {
   const roe = num(f.roe), opm = num(f.rörelsemarginal);
-  return (roe != null ? clip((roe - 0.1) * 20, 0, 5) : 0) + (opm != null ? clip((opm - 0.1) * 15, 0, 3) : 0);
+  return (roe != null ? clip((roe - 0.1) * 10, 0, 2.5) : 0) + (opm != null ? clip((opm - 0.1) * 10, 0, 1.5) : 0);
 }
-export const fairPE = (g, q = 0) => clip(15 + 80 * g + q, 12, 32);
+export const fairPE = (g, q = 0) => clip(14 + 70 * g + q, 10, 30);
 const gAt = (g0, k) => M.slutTillvaxt + (g0 - M.slutTillvaxt) * M.avtagande ** k;
 /** Vinst per aktie 12 månader framåt, räknat från år T (T=0 → E1). */
 export function epsAt(E1, g0, T) { let e = E1; for (let k = 1; k <= T; k++) e *= 1 + gAt(g0, k); return e; }
@@ -54,19 +54,23 @@ export function modelInputs(f, P) {
   };
 }
 
-/** Kurs om T år. full=true: P/E har helt nått "rimlig" nivå (används för rimligt värde). */
+/**
+ * Kurs om T år. full=true: P/E har helt nått sin målnivå (används för rimligt värde).
+ * Målnivån ligger mitt emellan (geometriskt) marknadens P/E idag och modellens "rimliga" P/E,
+ * eftersom marknaden ofta har skäl till sin värdering som modellen inte ser (bransch, risk).
+ */
 export function priceAt(inp, P, T, full = false, g0 = inp.g0) {
   const fair = fairPE(gAt(g0, T + 1), inp.q);
   if (inp.E1 > 0) {
-    const pe0 = P / inp.E1;
-    const pe = full ? fair : fair + (pe0 - fair) * M.peAterg ** T;
+    const pe0 = P / inp.E1, mål = Math.sqrt(pe0 * fair);
+    const pe = full ? mål : mål + (pe0 - mål) * M.peAterg ** T;
     return pe * epsAt(inp.E1, g0, T);
   }
   if (inp.sps > 0) {
     // Förlustbolag: försäljningen växer och marginalen antas bli normal på sikt
     const margin = clip((inp.bm ?? 0.4) * 0.35, 0.04, 0.25);
     const fairPS = margin * fair, ps0 = P / inp.sps;
-    const ps = full ? fairPS : fairPS + (ps0 - fairPS) * M.peAterg ** T;
+    const mål = Math.sqrt(ps0 * fairPS), ps = full ? mål : mål + (ps0 - mål) * M.peAterg ** T;
     return ps * inp.sps * (1 + g0) * epsAt(1, g0, T);
   }
   return null;
@@ -87,7 +91,7 @@ export function horizons(f, t, er1) {
       }
     }
     if (ann == null) continue;
-    ann = T === 1 ? clip(ann, -0.5, 1) : clip(ann, -0.25, 0.4);
+    ann = T === 1 ? clip(ann, -0.5, 1) : clip(ann, -0.25, 0.3);
     const band = (vol * 0.6) / Math.sqrt(T);
     const kurs = (a) => P * ((1 + a) ** T) / (1 + inp.d) ** T;
     rader.push({ år: T, årlig: ann, total: (1 + ann) ** T - 1, kurs: kurs(ann), låg: kurs(Math.max(ann - band, -0.6)), hög: kurs(ann + band) });

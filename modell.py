@@ -8,7 +8,7 @@ import math
 
 SLUT_TILLVAXT = 0.04   # långsiktig tillväxt när bolaget mognat
 AVTAGANDE = 0.65       # hur fort tillväxten avtar mot SLUT_TILLVAXT per år
-PE_ATERG = 0.7         # andel av "för högt/lågt" P/E som finns kvar efter ett år
+PE_ATERG = 0.75        # andel av "för högt/lågt" P/E som finns kvar efter ett år
 
 
 def clip(x, lo, hi):
@@ -25,11 +25,11 @@ def _num(x):
 
 def quality_premium(f: dict) -> float:
     roe, opm = _num(f.get("roe")), _num(f.get("rörelsemarginal"))
-    return (clip((roe - 0.1) * 20, 0, 5) if roe is not None else 0) + (clip((opm - 0.1) * 15, 0, 3) if opm is not None else 0)
+    return (clip((roe - 0.1) * 10, 0, 2.5) if roe is not None else 0) + (clip((opm - 0.1) * 10, 0, 1.5) if opm is not None else 0)
 
 
 def fair_pe(g, q=0.0):
-    return clip(15 + 80 * g + q, 12, 32)
+    return clip(14 + 70 * g + q, 10, 30)
 
 
 def g_at(g0, k):
@@ -70,13 +70,15 @@ def price_at(inp: dict, price: float, years: int, full=False):
     fair = fair_pe(g_at(g0, years + 1), inp["q"])
     if inp["E1"]:
         pe0 = price / inp["E1"]
-        pe = fair if full else fair + (pe0 - fair) * PE_ATERG ** years
+        mål = math.sqrt(pe0 * fair)  # mitt emellan marknadens och modellens P/E
+        pe = mål if full else mål + (pe0 - mål) * PE_ATERG ** years
         return pe * eps_at(inp["E1"], g0, years)
     if inp["sps"]:
         bm = inp["bm"] if inp["bm"] is not None else 0.4
         margin = clip(bm * 0.35, 0.04, 0.25)
         fair_ps, ps0 = margin * fair, price / inp["sps"]
-        ps = fair_ps if full else fair_ps + (ps0 - fair_ps) * PE_ATERG ** years
+        mål = math.sqrt(ps0 * fair_ps)
+        ps = mål if full else mål + (ps0 - mål) * PE_ATERG ** years
         return ps * inp["sps"] * (1 + g0) * eps_at(1, g0, years)
     return None
 
@@ -97,7 +99,7 @@ def horizons(f: dict, price: float, er1: float | None) -> dict:
                 if years == 3 and er1 is not None:
                     ann = 0.7 * ann + 0.3 * er1
         if ann is not None:
-            out[years] = clip(ann, -0.5, 1) if years == 1 else clip(ann, -0.25, 0.4)
+            out[years] = clip(ann, -0.5, 1) if years == 1 else clip(ann, -0.25, 0.3)
     return out
 
 

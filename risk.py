@@ -106,13 +106,28 @@ def one(t: str, h: pd.DataFrame, demo: bool) -> dict | None:
 
 
 def treasuries(demo: bool) -> list[dict]:
+    """Statspapper: räntan räknas som utdelningarna senaste 12 månaderna delat med kursen."""
     rows = []
     for t in STATSPAPPER:
-        info = S.get_info(t, demo) if not demo else {"longName": f"{t} Treasury Bill ETF", "yield": 0.041}
-        y = num(info.get("yield")) or num(info.get("trailingAnnualDividendYield")) or num(info.get("dividendYield"))
-        if y and y > 0.2:  # vissa versioner av yfinance ger procent i stället för andel
-            y /= 100
-        rows.append({"t": t, "n": (info.get("longName") or info.get("shortName") or t)[:60], "s": "Statspapper", "r": 0, "ränta": y})
+        name, y = f"{t} Treasury Bill ETF", 0.041
+        if not demo:
+            try:
+                import yfinance as yf
+                tk = yf.Ticker(t)
+                info = S.get_info(t, demo) or {}
+                name = info.get("longName") or info.get("shortName") or t
+                div = tk.dividends
+                price = float(tk.history(period="5d")["Close"].iloc[-1])
+                if len(div):
+                    idx = div.index.tz_localize(None) if getattr(div.index, "tz", None) is not None else div.index
+                    last = div[idx >= pd.Timestamp.now() - pd.Timedelta(days=365)]
+                    y = float(last.sum()) / price if price else None
+                else:
+                    y = None
+            except Exception as e:
+                print(f"  {t}: {e}")
+                y = None
+        rows.append({"t": t, "n": str(name)[:60], "s": "Statspapper", "r": 0, "ränta": None if y is None else round(y, 4)})
     return rows
 
 
