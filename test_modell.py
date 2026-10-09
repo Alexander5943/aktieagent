@@ -30,6 +30,24 @@ def js_results():
     return json.loads(out.stdout)
 
 
+RISK_CASES = [
+    (0.12, -0.10, 0.4, False, 50, 3e11, "Consumer Defensive"),   # lugn jätte -> 1
+    (0.28, -0.35, 1.1, False, 80, 5e10, "Technology"),
+    (0.52, -0.70, 1.8, True, 300, 1.2e9, "Healthcare"),          # förlust, ras, skuld, litet -> 10
+    (0.95, -0.90, None, True, None, None, None),
+    (0.22, -0.20, 0.5, False, 400, 8e9, "Utilities"),            # skuld räknas inte för elbolag
+    (None, None, None, False, None, None, None),
+]
+
+
+def js_risk():
+    script = ("import { riskLevel } from './worker/src/analys.js';"
+              f"const c = {json.dumps(RISK_CASES)};"
+              "console.log(JSON.stringify(c.map(x => riskLevel(...x))));")
+    out = subprocess.run(["node", "--input-type=module", "-e", script], cwd=ROOT, capture_output=True, text=True, check=True)
+    return json.loads(out.stdout)
+
+
 def main():
     fails = 0
     for (f, p, er), js in zip(CASES, js_results()):
@@ -42,6 +60,11 @@ def main():
         if set(map(int, js)) != set(py):
             fails += 1
             print(f"SKILLNAD i vilka år som finns: js {sorted(js)} py {sorted(py)}")
+    for case, js in zip(RISK_CASES, js_risk()):
+        py = modell.risk_level(*case)
+        if py != js:
+            fails += 1
+            print(f"SKILLNAD risknivå {case}: js {js} py {py}")
     print("Python och server ger samma svar" if not fails else f"{fails} skillnader")
     return 1 if fails else 0
 

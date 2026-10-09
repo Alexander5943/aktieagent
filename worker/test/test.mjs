@@ -130,6 +130,14 @@ await test("ägarbetyg: bra, neutral och dålig ägarbild", async () => {
   assert.equal(ownership({ ägare: { institutioner: 1.4, insiders: 0.1, största: [] } }).betyg, "Neutral", "över 100 % kapas");
 });
 
+await test("risknivå på aktiesidan", async () => {
+  const d = await (await call(makeEnv(), "/api/stock?t=NVDA")).json();
+  assert.ok(d.risk.nivå >= 1 && d.risk.nivå <= 10);
+  assert.ok(d.risk.skäl[0].includes("svänger"));
+  const s = await (await call(makeEnv(), "/api/stock?t=SEAS")).json();
+  assert.ok(s.risk.nivå < d.risk.nivå, `lugn aktie (${s.risk.nivå}) under volatil (${d.risk.nivå})`);
+});
+
 await test("okänd ticker ger 404", async () => {
   const r = await call(makeEnv(), "/api/stock?t=NOPE");
   assert.equal(r.status, 404);

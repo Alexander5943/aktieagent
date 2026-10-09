@@ -486,6 +486,18 @@
       <p class="tiny muted">Ägarbetyget är en ledtråd bland flera – väg också in värderingen och AI-bedömningen. Uppgifterna kommer från bolagens och fondernas rapporter till USA:s finansinspektion och kan vara upp till 3 månader gamla.</p></div>`;
   }
 
+  // ----- Risknivå -----
+  function riskCard(s) {
+    const r = s.risk;
+    if (!r) return "";
+    return `<div class="card" id="sec-risk"><h2>Risknivå</h2>
+      <div class="risk-head"><b class="risk-num">${r.nivå}</b><span class="muted">/ 10</span><span class="pill ${riskCls(r.nivå)}" style="margin-left:auto">${esc(RISK[r.nivå][0])}</span></div>
+      <div class="riskbar" role="img" aria-label="Risknivå ${r.nivå} av 10">${Array.from({ length: 10 }, (_, i) => `<i class="${i < r.nivå ? "on" : ""}"></i>`).join("")}</div>
+      <ul class="pts small">${r.skäl.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+      <p class="small muted">${esc(RISK[r.nivå][1])}</p>
+      <a class="btn sec" href="#/topp" id="samerisk" style="text-decoration:none">Se fler aktier på nivå ${r.nivå}</a></div>`;
+  }
+
   // ----- Säsongsmönster -----
   function seasonBars(se) {
     const W = 340, H = 170, top = 18, bottom = 22, bw = W / 12;
@@ -620,7 +632,7 @@
     $("#topaction").innerHTML = starBtn();
 
     const metric = (label, val) => `<div><span>${label}</span><b>${val}</b></div>`;
-    const sections = [["sec-chart", "Graf"], ["sec-ai", "AI"], ["sec-avk", "Avkastning"], ["sec-varde", "Värdering"], ["sec-agare", "Ägare"], ["sec-bolag", "Bolaget"], ["sec-sasong", "Säsong"], ["sec-makro", "Makro"], ["sec-tal", "Nyckeltal"]];
+    const sections = [["sec-chart", "Graf"], ["sec-ai", "AI"], ["sec-avk", "Avkastning"], ["sec-varde", "Värdering"], ["sec-agare", "Ägare"], ["sec-bolag", "Bolaget"], ["sec-risk", "Risk"], ["sec-sasong", "Säsong"], ["sec-makro", "Makro"], ["sec-tal", "Nyckeltal"]];
     view.innerHTML = `
       <div class="hero">
         <div class="name">${esc(s.namn)} · ${esc(t)}${s.börs ? " · " + esc(s.börs) : ""}</div>
@@ -633,6 +645,7 @@
         const v = s.värdering, b = s.ägarbetyg, chip = (label, val, c, sec) => `<button class="qchip" data-sec="${sec}"><span>${label}</span><b class="pill ${c}">${esc(val)}</b></button>`;
         const lv = levelsFromStock(s), adv = adviceAt(lv, s.pris, (portfolio || []).some((x) => x.t === s.t), s.hype && s.hype.poäng);
         return [adv ? chip("Råd", adv.råd, RÅD_CLS[adv.råd], "sec-varde") : "", v ? chip("Värdering", v.läge.replace("Kraftigt ", "Mycket "), lägeCls(v.läge), "sec-varde") : "",
+          s.risk ? chip("Risk", `${s.risk.nivå}/10`, riskCls(s.risk.nivå), "sec-risk") : "",
           b ? chip("Ägarbetyg", b.betyg, { Bra: "buy", Neutral: "neutral", Dålig: "avoid" }[b.betyg], "sec-agare") : "",
           `<span id="qai"></span>`].join("");
       })()}</div>
@@ -647,6 +660,7 @@
       ${valCard(s)}
       ${ownerCard(s)}
       ${bolagCard(s)}
+      ${riskCard(s)}
       ${seasonCard(s)}
       ${macroCard(s)}
       <div class="card"><h2>Analysens poäng</h2>
@@ -673,6 +687,7 @@
       <p class="disclaimer">Underlag för egen analys – inte finansiell rådgivning. Data: Yahoo Finance.</p>`;
 
     framtidBox(t);
+    if ($("#samerisk")) $("#samerisk").onclick = () => { LS.set("riskNiva", s.risk.nivå); LS.set("toppTab", "risk"); };
     $("#quick").onclick = (e) => { const b = e.target.closest("button[data-sec]"); const el = b && document.getElementById(b.dataset.sec); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
     $("#jump").onclick = (e) => { const b = e.target.closest("button"); const el = b && document.getElementById(b.dataset.sec); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
 
@@ -794,13 +809,62 @@
   }
 
   // ---------- Listor: topplistor per tidshorisont och nya börsnoteringar ----------
-  const TABS = [["kort", "1–6 mån"], ["mellan", "1–3 år"], ["lang", "5–10 år"], ["nya", "Nya"]];
+  const TABS = [["kort", "1–6 mån"], ["mellan", "1–3 år"], ["lang", "5–10 år"], ["risk", "Risk"], ["nya", "Nya"]];
+
+  // ---------- Risknivåer ----------
+  const RISK_VOL = [0.15, 0.2, 0.25, 0.3, 0.37, 0.45, 0.55, 0.7, 0.9];
+  const RISK = [
+    ["Ingen risk", "Inte aktier: amerikanska statspapper (räntefonder med statsskuldväxlar). Värdet rör sig nästan inte alls, och du får ungefär räntan."],
+    ["Mycket låg", "Stora, stabila bolag som säljer saker folk alltid behöver, t.ex. mat, el och hygienartiklar."],
+    ["Låg", "Stabila, lönsamma bolag som svänger mindre än börsen i stort."],
+    ["Låg till måttlig", "Etablerade bolag som svänger ungefär som börsen."],
+    ["Måttlig", "Vanliga börsbolag. Ett dåligt år kan de falla en fjärdedel."],
+    ["Medel", "Bolag som svänger lite mer än börsen, ofta inom teknik och industri."],
+    ["Förhöjd", "Tillväxtbolag och bolag i branscher som går upp och ner med konjunkturen."],
+    ["Hög", "Snabbväxande eller skuldsatta bolag. Kan halveras under ett dåligt år."],
+    ["Mycket hög", "Mindre bolag, bolag med förluster eller stora kursras bakom sig."],
+    ["Extremt hög", "Spekulativa bolag. Kursen kan både flerdubblas och rasa."],
+    ["Spekulativ", "Det mest riskfyllda: ofta små bolag med förluster. Räkna med att kunna förlora det mesta."],
+  ];
+  const volText = (k) => k === 0 ? "nästan 0 %" : k === 1 ? "under 15 %" : k === 10 ? "över 90 %" : `${Math.round(RISK_VOL[k - 2] * 100)}–${Math.round(RISK_VOL[k - 1] * 100)} %`;
+  const riskCls = (k) => (k <= 3 ? "buy" : k <= 6 ? "hold" : "avoid");
+
+  function renderRiskList(el, d) {
+    if (!d) { el.innerHTML = `<div class="card empty"><p><b>Ingen risklista än</b></p><p class="small">Den skapas automatiskt en gång i månaden.</p></div>`; return; }
+    let lvl = LS.get("riskNiva", 5), sort = LS.get("riskSort", "x"), shown = 40;
+    const draw = () => {
+      const [namn, text] = RISK[lvl];
+      const rows = lvl === 0 ? d.statspapper : d.aktier.filter((x) => x.r === lvl).sort({
+        x: (a, b) => (b.x ?? 0) - (a.x ?? 0), a3: (a, b) => (b.a3 ?? -9) - (a.a3 ?? -9), mc: (a, b) => (b.mc || 0) - (a.mc || 0), v: (a, b) => (a.v ?? 9) - (b.v ?? 9) }[sort]);
+      el.innerHTML = `<div class="card"><h2>Välj din risknivå</h2>
+          <div class="risk-head"><b class="risk-num">${lvl}</b><span class="muted">/ 10</span><span class="pill ${lvl === 0 ? "buy" : riskCls(lvl)}" style="margin-left:auto">${esc(namn)}</span></div>
+          <input type="range" id="risk" class="riskslider" min="0" max="10" step="1" value="${lvl}" aria-label="Risknivå 0 till 10" aria-valuetext="${lvl} – ${esc(namn)}">
+          <div class="riskticks" aria-hidden="true">${Array.from({ length: 11 }, (_, i) => `<span>${i}</span>`).join("")}</div>
+          <p class="small" style="margin:10px 0 4px">${esc(text)}</p>
+          <p class="small muted" style="margin:0">${lvl === 0 ? "Svänger nästan 0 % på ett år." : `Svänger normalt ${volText(lvl)} på ett år.`} ${lvl > 0 ? `${d.per_nivå[lvl] || 0} aktier på den här nivån.` : ""}</p></div>
+        <div class="card">${lvl > 0 ? `<div class="toolbar" style="margin-bottom:4px"><select id="rsort" aria-label="Sortera">
+            ${[["x", "Bäst först (avkastning och kvalitet)"], ["a3", "Högst förväntad avkastning"], ["mc", "Störst bolag"], ["v", "Lugnast först"]].map(([k, l]) => `<option value="${k}" ${k === sort ? "selected" : ""}>${l}</option>`).join("")}</select></div>` : ""}
+          ${rows.length ? rows.slice(0, shown).map((x) => `<a class="row" href="#/aktie/${encodeURIComponent(x.t)}">
+            <div class="main"><b>${esc(x.t)}</b><span>${esc(x.n)}</span><span>${esc(x.s)}${x.mc ? " · " + big(x.mc) + " USD" : ""}</span></div>
+            <div class="side">${lvl === 0 ? `<b>${x.ränta != null ? pct(x.ränta, 1, false) : "–"}</b><span class="small muted" style="display:block">ränta/år</span>`
+              : `<b class="${cls(x.a3)}">${x.a3 != null ? pct(x.a3, 0) : "–"}</b><span class="small muted" style="display:block">väntas/år</span><span class="tiny muted" style="display:block">svänger ±${Math.round((x.v || 0) * 100)} %</span>`}</div></a>`).join("")
+            : `<p class="small muted">Inga aktier på den här nivån just nu.</p>`}
+          ${rows.length > shown ? `<button class="btn sec" id="rmore" style="margin-top:10px">Visa fler (${rows.length - shown} till)</button>` : ""}
+        </div>
+        <p class="disclaimer">Risknivån bygger på hur mycket aktien svänger, och justeras för förluster, stora ras, hög skuld, litet bolag eller lugna lönsamma bolag. Alla amerikanska aktier över 300 mn USD i börsvärde. Uppdaterad ${esc(d.uppdaterad)}, räknas om varje månad. Högre risk betyder inte högre avkastning – bara större svängningar åt båda hållen.</p>`;
+      const sl = $("#risk");
+      sl.oninput = () => { lvl = +sl.value; LS.set("riskNiva", lvl); shown = 40; draw(); $("#risk").focus(); };
+      if ($("#rsort")) $("#rsort").onchange = (e) => { sort = e.target.value; LS.set("riskSort", sort); draw(); };
+      if ($("#rmore")) $("#rmore").onclick = () => { shown += 40; draw(); };
+    };
+    draw();
+  }
   async function viewTop() {
     setTop("Topplista");
     let tab = LS.get("toppTab", "mellan");
     view.innerHTML = `<div class="seg" id="seg">${TABS.map(([k, l]) => `<button data-k="${k}">${l}</button>`).join("")}</div><div id="lst"><div class="card"><div class="skeleton" style="height:200px"></div></div></div>`;
     const lst = $("#lst");
-    let ranking = null, ipos = null;
+    let ranking = null, ipos = null, riskData = null;
     const load = async (url) => { const r = await fetch(url + "?" + Date.now()); if (!r.ok) throw new Error(); return r.json(); };
 
     const listRow = (r, side) => `<a class="row" href="#/aktie/${encodeURIComponent(r.ticker)}">
@@ -859,7 +923,10 @@
     const show = async (k) => {
       tab = k; LS.set("toppTab", k);
       document.querySelectorAll("#seg button").forEach((b) => b.classList.toggle("on", b.dataset.k === k));
-      if (k === "nya") {
+      if (k === "risk") {
+        if (!riskData) { lst.innerHTML = `<div class="card"><div class="skeleton" style="height:200px"></div></div>`; try { riskData = await load("data/risk.json"); } catch { riskData = null; } }
+        if (tab === "risk") renderRiskList(lst, riskData);
+      } else if (k === "nya") {
         if (!ipos) { lst.innerHTML = `<div class="card"><div class="skeleton" style="height:200px"></div></div>`; try { ipos = await load("data/ipos.json"); } catch { ipos = null; } }
         if (tab === "nya") renderIpo();
       } else {

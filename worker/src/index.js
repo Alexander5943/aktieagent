@@ -13,7 +13,7 @@
  *   APP_KEY            din egen app-kod, så att bara du kan använda servern
  */
 
-import { horizons, valuation, hype, seasonality, macro, ownership, FACTORS } from "./analys.js";
+import { horizons, valuation, hype, seasonality, macro, ownership, risk, FACTORS } from "./analys.js";
 
 const MODEL = "claude-opus-5-5";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
@@ -367,6 +367,7 @@ async function stock(t, env, ctx) {
       värdering: safe(() => valuation(f, tech)),
       hype: safe(() => hype(f, tech)),
       ägarbetyg: safe(() => ownership(f)),
+      risk: safe(() => risk(f, tech)),
       säsong: safe(() => seasonality(ch.rows)),
       makro: safe(() => macro(ch.rows, ms)),
       rapporter: fin, nyheter: nw, hämtad: Date.now(),

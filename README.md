@@ -14,6 +14,7 @@ En privat aktieapp för mobilen. Du kan:
 - **Köp- och säljkurser.** I bevakningslistan, på aktiesidan och i portföljen visas för varje aktie om du bör köpa (mer), hålla, sälja en del eller sälja allt, och vid vilken kurs: köp under kursen där aktien väntas ge minst 15 % per år, sälj en del över 8 % och sälj allt över 4 % per år (3 års sikt).
 - **Bevaka egna aktier.** Tryck på stjärnan. AI-analysen uppdateras automatiskt varje måndag.
 - **Topplistor** för tre tidshorisonter: 1–6 månader, 1–3 år och 5–10 år (S&P 500, den 1:a varje månad).
+- **Risklista.** Välj risknivå 0–10 med ett reglage och se alla amerikanska aktier på den nivån (0 = statspapper, 10 = spekulativt). Varje aktiesida visar också sin risknivå och varför. Räknas om den 3:e varje månad (`risk.py`, gratis).
 - **Nya börsnoteringar** i USA det senaste året, uppdaterad varje vardagskväll.
 - **Framtidsaktier**: topp 50 bolag som ännu inte är lönsamma men har bäst idéer för framtidens problem och en tydlig plan. AI bedömer idéerna. Uppdateras var 3:e månad.
 
@@ -27,6 +28,7 @@ Underlag för egen analys – inte finansiell rådgivning.
 | Servern | `worker/` → Cloudflare Workers (gratis) | Hämtar data från Yahoo Finance, kör AI, sparar bevakningslistan |
 | Topplistorna | `screener.py` + `modell.py` → GitHub Actions | Körs den 1:a varje månad |
 | Nya börsnoteringar | `ipo.py` → GitHub Actions | Körs varje vardagskväll |
+| Risklistan | `risk.py` + `modell.py` → GitHub Actions | Den 3:e varje månad |
 | Portföljens AI-genomgång | `portfolj_daglig.py` → GitHub Actions | Varje vardagskväll, bara om påslagen i appen |
 | Framtidsaktier | `framtid.py` → GitHub Actions | Körs 2 jan, apr, jul och okt (cirka 10 kr i AI) |
 

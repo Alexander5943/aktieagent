@@ -116,3 +116,31 @@ def seasonal_ahead(means, from_month: int, n: int = 6):
     if not means:
         return None
     return sum((means[(from_month - 1 + i) % 12] or 0) for i in range(n))
+
+
+# ---------------------------------------------------------------------------
+# Risknivå 1–10 (samma regel som riskLevel() i worker/src/analys.js)
+# ---------------------------------------------------------------------------
+# Grunden är hur mycket aktien svänger på ett år (volatilitet). Sedan justeras den för
+# förluster, stora ras, hög skuld, litet bolag och – åt andra hållet – lugna lönsamma bolag.
+# Nivå 0 används bara för statspapper (räntefonder), inte för aktier.
+
+RISK_VOL = [0.15, 0.20, 0.25, 0.30, 0.37, 0.45, 0.55, 0.70, 0.90]
+SKULD_OK = ("Financial Services", "Real Estate", "Utilities")
+
+
+def risk_level(vol, dd=None, beta=None, loss=False, de=None, mcap=None, sector=None) -> int | None:
+    if vol is None or not math.isfinite(vol):
+        return None
+    lvl = 1 + sum(vol > x for x in RISK_VOL)
+    if loss:
+        lvl += 1
+    if dd is not None and dd < -0.6:
+        lvl += 1
+    if de is not None and de > 200 and sector not in SKULD_OK:
+        lvl += 1
+    if mcap is not None and mcap < 2e9:
+        lvl += 1
+    if not loss and beta is not None and beta < 0.6 and dd is not None and dd > -0.25:
+        lvl -= 1
+    return int(clip(lvl, 1, 10))

@@ -361,3 +361,37 @@ export function ownership(f) {
     plus: plus.map((x) => x.text), minus: minus.map((x) => x.text),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Risknivå 1–10 (samma regel som risk_level() i modell.py)
+// ---------------------------------------------------------------------------
+
+export const RISK_VOL = [0.15, 0.2, 0.25, 0.3, 0.37, 0.45, 0.55, 0.7, 0.9];
+const SKULD_OK = ["Financial Services", "Real Estate", "Utilities"];
+
+export function riskLevel(vol, dd = null, beta = null, loss = false, de = null, mcap = null, sector = null) {
+  if (vol == null || !isFinite(vol)) return null;
+  let lvl = 1 + RISK_VOL.filter((x) => vol > x).length;
+  if (loss) lvl += 1;
+  if (dd != null && dd < -0.6) lvl += 1;
+  if (de != null && de > 200 && !SKULD_OK.includes(sector)) lvl += 1;
+  if (mcap != null && mcap < 2e9) lvl += 1;
+  if (!loss && beta != null && beta < 0.6 && dd != null && dd > -0.25) lvl -= 1;
+  return clip(lvl, 1, 10);
+}
+
+/** Risknivå med förklaring, för aktiesidan. */
+export function risk(f, t) {
+  f = f || {};
+  const loss = f.vinstmarginal != null && f.vinstmarginal < 0;
+  const nivå = riskLevel(t.volatilitet, t.max_drawdown_2år, f.beta, loss, f.skuld_eget_kapital, f.börsvärde, f.sektor);
+  if (nivå == null) return null;
+  const p = (x) => `${Math.round(Math.abs(x) * 100)} %`;
+  const skäl = [`Aktien svänger normalt ungefär ±${p(t.volatilitet)} på ett år.`];
+  if (loss) skäl.push("Bolaget går med förlust. (+1)");
+  if (t.max_drawdown_2år != null && t.max_drawdown_2år < -0.6) skäl.push(`Kursen har rasat ${p(t.max_drawdown_2år)} från toppen de senaste 2 åren. (+1)`);
+  if (f.skuld_eget_kapital != null && f.skuld_eget_kapital > 200 && !SKULD_OK.includes(f.sektor)) skäl.push("Bolaget har hög skuld. (+1)");
+  if (f.börsvärde != null && f.börsvärde < 2e9) skäl.push("Litet bolag (börsvärde under 2 miljarder dollar). (+1)");
+  if (!loss && f.beta != null && f.beta < 0.6 && t.max_drawdown_2år != null && t.max_drawdown_2år > -0.25) skäl.push("Lönsamt bolag som rör sig lugnt även när börsen svänger. (−1)");
+  return { nivå, skäl };
+}
