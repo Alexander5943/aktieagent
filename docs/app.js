@@ -95,7 +95,6 @@
     if (page !== "aktie" && page !== "installningar") LS.set("lastTab", page);
     if (page === "sok") return viewSearch();
     if (page === "topp") return viewTop();
-    if (page === "framtid") return viewFuture();
     if (page === "installningar") return viewSettings();
     if (page === "portfolj") return viewPortfolio(arg === "ny" && arg2 ? decodeURIComponent(arg2).toUpperCase() : null);
     if (page === "aktie" && arg) return viewStock(decodeURIComponent(arg).toUpperCase());
@@ -429,7 +428,6 @@
     const kv = (k, v) => (v == null || v === "" ? "" : `<div class="kv"><span>${k}</span><b>${v}</b></div>`);
     const host = (u) => String(u || "").replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "");
     return `<div class="card" id="sec-bolag"><h2>Bolaget</h2>
-      <div id="framtidbox"></div>
       <div id="aibolag">${aiBolag(null)}</div>
       ${f.beskrivning ? `<details><summary>Bolagets egen beskrivning</summary><p class="desc" lang="en">${esc(f.beskrivning)}</p></details>` : ""}
       <h3>Fakta</h3>
@@ -494,8 +492,7 @@
       <div class="risk-head"><b class="risk-num">${r.nivå}</b><span class="muted">/ 10</span><span class="pill ${riskCls(r.nivå)}" style="margin-left:auto">${esc(RISK[r.nivå][0])}</span></div>
       <div class="riskbar" role="img" aria-label="Risknivå ${r.nivå} av 10">${Array.from({ length: 10 }, (_, i) => `<i class="${i < r.nivå ? "on" : ""}"></i>`).join("")}</div>
       <ul class="pts small">${r.skäl.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
-      <p class="small muted">${esc(RISK[r.nivå][1])}</p>
-      <a class="btn sec" href="#/topp" id="samerisk" style="text-decoration:none">Se fler aktier på nivå ${r.nivå}</a></div>`;
+      <p class="small muted">${esc(RISK[r.nivå][1])}</p></div>`;
   }
 
   // ----- Säsongsmönster -----
@@ -686,8 +683,6 @@
         `<a href="${safeUrl(n.länk)}" target="_blank" rel="noopener">${esc(n.titel)}<span>${esc(n.källa || "")}${n.tid ? " · " + esc(ago(n.tid * 1000)) : ""}</span></a>`).join("")}</div>` : ""}
       <p class="disclaimer">Underlag för egen analys – inte finansiell rådgivning. Data: Yahoo Finance.</p>`;
 
-    framtidBox(t);
-    if ($("#samerisk")) $("#samerisk").onclick = () => { LS.set("riskNiva", s.risk.nivå); LS.set("toppTab", "risk"); };
     $("#quick").onclick = (e) => { const b = e.target.closest("button[data-sec]"); const el = b && document.getElementById(b.dataset.sec); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
     $("#jump").onclick = (e) => { const b = e.target.closest("button"); const el = b && document.getElementById(b.dataset.sec); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
 
@@ -808,11 +803,10 @@
     } catch (e) { if (!gone()) showAI(null); }
   }
 
-  // ---------- Listor: topplistor per tidshorisont och nya börsnoteringar ----------
-  const TABS = [["kort", "1–6 mån"], ["mellan", "1–3 år"], ["lang", "5–10 år"], ["risk", "Risk"], ["nya", "Nya"]];
+  // ---------- Topplistor per tidshorisont ----------
+  const TABS = [["kort", "1–6 mån"], ["mellan", "1–3 år"], ["lang", "5–10 år"]];
 
   // ---------- Risknivåer ----------
-  const RISK_VOL = [0.15, 0.2, 0.25, 0.3, 0.37, 0.45, 0.55, 0.7, 0.9];
   const RISK = [
     ["Ingen risk", "Inte aktier: amerikanska statspapper (räntefonder med statsskuldväxlar). Värdet rör sig nästan inte alls, och du får ungefär räntan."],
     ["Mycket låg", "Stora, stabila bolag som säljer saker folk alltid behöver, t.ex. mat, el och hygienartiklar."],
@@ -826,45 +820,15 @@
     ["Extremt hög", "Spekulativa bolag. Kursen kan både flerdubblas och rasa."],
     ["Spekulativ", "Det mest riskfyllda: ofta små bolag med förluster. Räkna med att kunna förlora det mesta."],
   ];
-  const volText = (k) => k === 0 ? "nästan 0 %" : k === 1 ? "under 15 %" : k === 10 ? "över 90 %" : `${Math.round(RISK_VOL[k - 2] * 100)}–${Math.round(RISK_VOL[k - 1] * 100)} %`;
   const riskCls = (k) => (k <= 3 ? "buy" : k <= 6 ? "hold" : "avoid");
 
-  function renderRiskList(el, d) {
-    if (!d) { el.innerHTML = `<div class="card empty"><p><b>Ingen risklista än</b></p><p class="small">Den skapas automatiskt en gång i månaden.</p></div>`; return; }
-    let lvl = LS.get("riskNiva", 5), sort = LS.get("riskSort", "x"), shown = 40;
-    const draw = () => {
-      const [namn, text] = RISK[lvl];
-      const rows = lvl === 0 ? d.statspapper : d.aktier.filter((x) => x.r === lvl).sort({
-        x: (a, b) => (b.x ?? 0) - (a.x ?? 0), a3: (a, b) => (b.a3 ?? -9) - (a.a3 ?? -9), mc: (a, b) => (b.mc || 0) - (a.mc || 0), v: (a, b) => (a.v ?? 9) - (b.v ?? 9) }[sort]);
-      el.innerHTML = `<div class="card"><h2>Välj din risknivå</h2>
-          <div class="risk-head"><b class="risk-num">${lvl}</b><span class="muted">/ 10</span><span class="pill ${lvl === 0 ? "buy" : riskCls(lvl)}" style="margin-left:auto">${esc(namn)}</span></div>
-          <input type="range" id="risk" class="riskslider" min="0" max="10" step="1" value="${lvl}" aria-label="Risknivå 0 till 10" aria-valuetext="${lvl} – ${esc(namn)}">
-          <div class="riskticks" aria-hidden="true">${Array.from({ length: 11 }, (_, i) => `<span>${i}</span>`).join("")}</div>
-          <p class="small" style="margin:10px 0 4px">${esc(text)}</p>
-          <p class="small muted" style="margin:0">${lvl === 0 ? "Svänger nästan 0 % på ett år." : `Svänger normalt ${volText(lvl)} på ett år.`} ${lvl > 0 ? `${d.per_nivå[lvl] || 0} aktier på den här nivån.` : ""}</p></div>
-        <div class="card">${lvl > 0 ? `<div class="toolbar" style="margin-bottom:4px"><select id="rsort" aria-label="Sortera">
-            ${[["x", "Bäst först (avkastning och kvalitet)"], ["a3", "Högst förväntad avkastning"], ["mc", "Störst bolag"], ["v", "Lugnast först"]].map(([k, l]) => `<option value="${k}" ${k === sort ? "selected" : ""}>${l}</option>`).join("")}</select></div>` : ""}
-          ${rows.length ? rows.slice(0, shown).map((x) => `<a class="row" href="#/aktie/${encodeURIComponent(x.t)}">
-            <div class="main"><b>${esc(x.t)}</b><span>${esc(x.n)}</span><span>${esc(x.s)}${x.mc ? " · " + big(x.mc) + " USD" : ""}</span></div>
-            <div class="side">${lvl === 0 ? `<b>${x.ränta != null ? pct(x.ränta, 1, false) : "–"}</b><span class="small muted" style="display:block">ränta/år</span>`
-              : `<b class="${cls(x.a3)}">${x.a3 != null ? pct(x.a3, 0) : "–"}</b><span class="small muted" style="display:block">väntas/år</span><span class="tiny muted" style="display:block">svänger ±${Math.round((x.v || 0) * 100)} %</span>`}</div></a>`).join("")
-            : `<p class="small muted">Inga aktier på den här nivån just nu.</p>`}
-          ${rows.length > shown ? `<button class="btn sec" id="rmore" style="margin-top:10px">Visa fler (${rows.length - shown} till)</button>` : ""}
-        </div>
-        <p class="disclaimer">Risknivån bygger på hur mycket aktien svänger, och justeras för förluster, stora ras, hög skuld, litet bolag eller lugna lönsamma bolag. Alla amerikanska aktier över 300 mn USD i börsvärde. Uppdaterad ${esc(d.uppdaterad)}, räknas om varje månad. Högre risk betyder inte högre avkastning – bara större svängningar åt båda hållen.</p>`;
-      const sl = $("#risk");
-      sl.oninput = () => { lvl = +sl.value; LS.set("riskNiva", lvl); shown = 40; draw(); $("#risk").focus(); };
-      if ($("#rsort")) $("#rsort").onchange = (e) => { sort = e.target.value; LS.set("riskSort", sort); draw(); };
-      if ($("#rmore")) $("#rmore").onclick = () => { shown += 40; draw(); };
-    };
-    draw();
-  }
   async function viewTop() {
     setTop("Topplista");
     let tab = LS.get("toppTab", "mellan");
+    if (!TABS.some(([k]) => k === tab)) tab = "mellan";
     view.innerHTML = `<div class="seg" id="seg">${TABS.map(([k, l]) => `<button data-k="${k}">${l}</button>`).join("")}</div><div id="lst"><div class="card"><div class="skeleton" style="height:200px"></div></div></div>`;
     const lst = $("#lst");
-    let ranking = null, ipos = null, riskData = null;
+    let ranking = null;
     const load = async (url) => { const r = await fetch(url + "?" + Date.now()); if (!r.ok) throw new Error(); return r.json(); };
 
     const listRow = (r, side) => `<a class="row" href="#/aktie/${encodeURIComponent(r.ticker)}">
@@ -894,106 +858,14 @@
         <p class="disclaimer">${k === "kort" ? "Kort sikt är mest slump. Säsongsmönster och momentum håller inte alltid." : "Uppskattningar byggda på analytikers prognoser, vinst, tillväxt och kvalitet – inga löften."} Uppdateras den 1:a varje månad. Inte finansiell rådgivning.</p>`;
     };
 
-    const renderIpo = () => {
-      if (!ipos) { lst.innerHTML = `<div class="card empty"><p><b>Ingen lista än</b></p><p class="small">Listan över nya börsnoteringar uppdateras varje vardagskväll.</p></div>`; return; }
-      const sort = LS.get("ipoSort", "nyast"), hideSpac = LS.get("ipoHideSpac", true);
-      let rows = ipos.noteringar.filter((r) => !(hideSpac && r.spac));
-      const by = { nyast: (a, b) => b.datum.localeCompare(a.datum), bast: (a, b) => (b.sedan_ipo ?? b.sedan_första_dagen) - (a.sedan_ipo ?? a.sedan_första_dagen), samst: (a, b) => (a.sedan_ipo ?? a.sedan_första_dagen) - (b.sedan_ipo ?? b.sedan_första_dagen), storst: (a, b) => (b.börsvärde || 0) - (a.börsvärde || 0) }[sort];
-      rows = rows.slice().sort(by);
-      const fmtD = (iso) => { const d = new Date(iso + "T00:00:00Z"); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}`; };
-      const ret = (r) => r.sedan_ipo ?? r.sedan_första_dagen;
-      lst.innerHTML = `<div class="card"><h2>Nya börsnoteringar</h2>
-        <p class="small muted" style="margin:-4px 0 6px">Börsnoterade i USA sedan ${esc(fmtD(ipos.från))} · uppdaterad ${esc(ipos.uppdaterad)}</p>
-        <div class="toolbar"><select id="ipoSort" aria-label="Sortera">
-          ${[["nyast", "Senast noterade"], ["bast", "Bäst sedan noteringen"], ["samst", "Sämst sedan noteringen"], ["storst", "Störst börsvärde"]].map(([k, l]) => `<option value="${k}" ${k === sort ? "selected" : ""}>${l}</option>`).join("")}
-        </select><label><input type="checkbox" id="spac" ${hideSpac ? "checked" : ""}> Dölj SPAC-bolag</label></div>
-        ${rows.length ? rows.map((r) => `<a class="row" href="#/aktie/${encodeURIComponent(r.t)}">
-          <div class="main"><b>${esc(r.t)}</b><span>${esc(r.namn)}</span><span>${esc(fmtD(r.datum))} · ${r.dagar} dagar${r.börsvärde ? " · värde " + big(r.börsvärde) : ""}</span></div>
-          <div class="side"><b class="${cls(ret(r))}">${pct(ret(r), 0)}</b><span class="small muted">${r.ipo_pris ? `från ${num(r.ipo_pris)}` : "sedan dag 1"}</span></div></a>`).join("")
-          : `<p class="small muted">Inga noteringar att visa.</p>`}
-      </div>
-      ${ipos.kommande && ipos.kommande.length ? `<div class="card"><h2>Kommande noteringar</h2>${ipos.kommande.map((r) => `<div class="row">
-          <div class="main"><b>${esc(r.t || "–")}</b><span>${esc(r.namn)}</span></div>
-          <div class="side"><b class="small">${/^\d{4}-\d\d-\d\d$/.test(r.datum || "") ? esc(fmtD(r.datum)) : esc(r.datum || "")}</b><span class="small muted">${r.pris ? esc(r.pris) + " $" : ""}</span></div></div>`).join("")}</div>` : ""}
-      <p class="disclaimer">Avkastning räknas från teckningskursen vid noteringen. Nya bolag svänger mycket. Källa: ${esc(ipos.källa)}, Yahoo Finance.</p>`;
-      $("#ipoSort").onchange = (e) => { LS.set("ipoSort", e.target.value); renderIpo(); };
-      $("#spac").onchange = (e) => { LS.set("ipoHideSpac", e.target.checked); renderIpo(); };
-    };
-
     const show = async (k) => {
       tab = k; LS.set("toppTab", k);
       document.querySelectorAll("#seg button").forEach((b) => b.classList.toggle("on", b.dataset.k === k));
-      if (k === "risk") {
-        if (!riskData) { lst.innerHTML = `<div class="card"><div class="skeleton" style="height:200px"></div></div>`; try { riskData = await load("data/risk.json"); } catch { riskData = null; } }
-        if (tab === "risk") renderRiskList(lst, riskData);
-      } else if (k === "nya") {
-        if (!ipos) { lst.innerHTML = `<div class="card"><div class="skeleton" style="height:200px"></div></div>`; try { ipos = await load("data/ipos.json"); } catch { ipos = null; } }
-        if (tab === "nya") renderIpo();
-      } else {
-        if (!ranking) { try { ranking = await load("data/ranking.json"); } catch { ranking = null; } }
-        if (tab === k) renderList(k);
-      }
+      if (!ranking) { try { ranking = await load("data/ranking.json"); } catch { ranking = null; } }
+      if (tab === k) renderList(k);
     };
     $("#seg").onclick = (e) => { const b = e.target.closest("button"); if (b) show(b.dataset.k); };
     show(tab);
-  }
-
-  // ---------- Framtidsaktier ----------
-  let framtidP = null;
-  const loadFramtid = () => (framtidP = framtidP || fetch("data/framtid.json?" + Date.now()).then((r) => { if (!r.ok) throw new Error(); return r.json(); }).catch((e) => { framtidP = null; throw e; }));
-  const fmtDay = (iso) => { const d = new Date(iso + "T00:00:00Z"); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}`; };
-  const change = (r) => r.förra == null ? `<span class="pill ghost">Ny</span>` : r.förra > r.rank ? `<span class="tiny up">▲ ${r.förra - r.rank}</span>`
-    : r.förra < r.rank ? `<span class="tiny down">▼ ${r.rank - r.förra}</span>` : "";
-  const delBars = (delar) => Object.entries(delar).map(([k, v]) => `<div class="bar"><span>${esc(k)}</span><div class="track"><div class="fill" style="width:${(v || 0) * 10}%"></div></div><b>${num(v, k === "Genomförande" ? 1 : 0)}</b></div>`).join("");
-
-  async function viewFuture() {
-    setTop("Framtidsaktier");
-    view.innerHTML = `<div class="card"><div class="skeleton" style="height:240px"></div></div>`;
-    let d;
-    try { d = await loadFramtid(); }
-    catch { view.innerHTML = `<div class="card empty"><p><b>Ingen lista än</b></p><p class="small">Listan skapas var 3:e månad (2 januari, april, juli och oktober).</p></div>`; return; }
-    if (location.hash.replace(/^#\/?/, "") !== "framtid") return;
-    const counts = {}; d.rader.forEach((r) => (counts[r.tema] = (counts[r.tema] || 0) + 1));
-    const teman = ["Alla", ...Object.keys(counts).sort((a, b) => counts[b] - counts[a])];
-    let tema = LS.get("framtidTema", "Alla"); if (!teman.includes(tema)) tema = "Alla";
-    const render = () => {
-      const rows = d.rader.filter((r) => tema === "Alla" || r.tema === tema);
-      view.innerHTML = `
-        <div class="card"><h2>Morgondagens idéer</h2>
-          <p class="small" style="margin:0 0 6px">Bolag som ännu inte går med vinst, men som har idéer som löser framtidens problem och en tydlig plan för att nå dit.</p>
-          <p class="tiny muted" style="margin:0">Uppdaterad ${esc(fmtDay(d.uppdaterad))} · nästa ${esc(fmtDay(d.nästa))} · ${esc(d.olönsamma)} olönsamma bolag gicks igenom</p>
-          <details><summary>Så rangordnas listan</summary>
-            <p class="small">Poängen 0–100 väger ihop fyra delar:</p>
-            <ul class="pts small"><li><b>Idé 35 %:</b> hur bra, unik och svår att kopiera lösningen är.</li>
-              <li><b>Framtidsproblem 25 %:</b> hur stort och växande problemet är.</li>
-              <li><b>Målmedvetenhet 20 %:</b> tydlig plan, fokus och milstolpar som nåtts.</li>
-              <li><b>Genomförande 20 %:</b> räknas ur siffrorna – tillväxt, hur länge kassan räcker, bruttomarginal, hur mycket ledningen äger och analytikernas prognos.</li></ul>
-            <p class="small muted">De tre första bedöms av AI utifrån bolagens beskrivning och siffror. Bolag mindre än 300 mn USD, banker, fastighetsbolag och SPAC-bolag är inte med.</p>
-          </details></div>
-        <nav class="jump" style="position:static" aria-label="Tema">${teman.map((t) => `<button data-t="${esc(t)}" style="${t === tema ? "background:var(--text);color:var(--bg);border-color:var(--text)" : ""}">${esc(t)}${t === "Alla" ? "" : ` · ${counts[t]}`}</button>`).join("")}</nav>
-        <div class="card">${rows.map((r) => `<a class="frow" href="#/aktie/${encodeURIComponent(r.ticker)}">
-            <div class="rk"><b>${r.rank}</b>${change(r)}</div>
-            <div class="main"><div class="t"><b>${esc(r.ticker)}</b><span class="chip">${esc(r.tema)}</span></div>
-              <span class="nm">${esc(r.namn)}</span>
-              <p><b>Löser:</b> ${esc(r.problem)}</p><p class="muted">${esc(r.idé)}</p></div>
-            <div class="sc"><b>${r.poäng}</b><span>/100</span></div></a>`).join("")}</div>
-        <p class="disclaimer">Bolag utan vinst är riskabla. De kan behöva ta in nya pengar (nyemission) eller misslyckas helt. Sprid riskerna. Inte finansiell rådgivning.</p>`;
-      $(".jump", view).onclick = (e) => { const b = e.target.closest("button"); if (!b) return; tema = b.dataset.t; LS.set("framtidTema", tema); render(); };
-    };
-    render();
-  }
-
-  // På aktiesidan: visa om aktien finns bland framtidsaktierna
-  async function framtidBox(t) {
-    try {
-      const d = await loadFramtid(), r = d.rader.find((x) => x.ticker === t), el = $("#framtidbox");
-      if (!r || !el) return;
-      el.innerHTML = `<div class="callout"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-          <b>Framtidsaktie #${r.rank} av ${d.rader.length}</b><span class="pill ghost">${esc(r.tema)} · ${r.poäng}/100</span></div>
-        <p style="margin:8px 0 4px"><b>Löser:</b> ${esc(r.problem)}</p><p style="margin:4px 0">${esc(r.idé)}</p>
-        ${r.mål ? `<p style="margin:4px 0"><b>Mål:</b> ${esc(r.mål)}</p>` : ""}${r.risk ? `<p style="margin:4px 0"><b>Största risk:</b> ${esc(r.risk)}</p>` : ""}
-        <details><summary>Poängen</summary>${delBars(r.delar)}</details></div>`;
-    } catch { /* ingen lista än */ }
   }
 
   // ---------- Portfölj ----------
