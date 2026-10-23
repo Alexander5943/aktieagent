@@ -16,7 +16,7 @@ concurrency: krasch
 jobs:
   matare:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
 
@@ -32,7 +32,8 @@ jobs:
         id: k
         env:
           PYTHONIOENCODING: utf-8
-        run: python krasch.py
+        run: python -u krasch.py
+        timeout-minutes: 10
 
       - name: Spara
         run: |

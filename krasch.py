@@ -66,18 +66,20 @@ GRUPPER = [
 def fred(sid: str):
     url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}&cosd={START}"
     err = None
-    for i in range(4):
+    t0 = time.time()
+    for i in range(3):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (aktieagent)"})
-            with urllib.request.urlopen(req, timeout=60) as r:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) aktieagent", "Accept": "text/csv,*/*"})
+            with urllib.request.urlopen(req, timeout=30) as r:
                 df = pd.read_csv(io.StringIO(r.read().decode("utf-8")))
             s = pd.Series(pd.to_numeric(df.iloc[:, 1], errors="coerce").values, index=pd.to_datetime(df.iloc[:, 0])).dropna()
             if len(s):
+                print(f"  FRED {sid}: {len(s)} rader, {time.time() - t0:.0f} s", flush=True)
                 return s.sort_index()
             err = "tom serie"
         except Exception as e:  # noqa: BLE001
             err = e
-        time.sleep(4 * (i + 1))
+        time.sleep(3 * (i + 1))
     print(f"::warning::FRED {sid} kunde inte hämtas: {err}")
     return None
 
@@ -114,8 +116,26 @@ def spy_pe():
 
 
 def hamta():
-    f = {s: fred(s) for s in FRED}
-    y = {t: yahoo(t) for t in YAHOO}
+    from concurrent.futures import ThreadPoolExecutor
+    t0 = time.time()
+    with ThreadPoolExecutor(5) as ex:
+        f = dict(zip(FRED, ex.map(fred, FRED)))
+    print(f"FRED klart på {time.time() - t0:.0f} s", flush=True)
+    import yfinance as yf
+    t0 = time.time()
+    df = yf.download(YAHOO, start=START, auto_adjust=True, progress=False, threads=True, group_by="ticker", timeout=30)
+    y = {}
+    for t in YAHOO:
+        try:
+            c = df[t]["Close"].dropna()
+            idx = pd.to_datetime(c.index)
+            c.index = idx.tz_localize(None) if idx.tz is not None else idx
+            y[t] = c.sort_index() if len(c) else None
+        except Exception:  # noqa: BLE001
+            y[t] = None
+        if y[t] is None:
+            y[t] = yahoo(t)
+    print(f"Yahoo klart på {time.time() - t0:.0f} s", flush=True)
     return f, y, spy_pe()
 
 
