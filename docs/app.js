@@ -893,12 +893,12 @@
       <circle cx="100" cy="100" r="7" fill="var(--text)"/></svg>`;
   }
 
-  function spark(vals, color) {
+  function sigSpark(vals, color) {
     const v = vals.map((x, i) => [i, x]).filter(([, x]) => x != null);
     if (v.length < 2) return "";
     const ys = v.map(([, x]) => x), lo = Math.min(...ys), hi = Math.max(...ys), n = vals.length - 1;
     const P = v.map(([i, x]) => `${((i / n) * 300).toFixed(1)},${(38 - ((x - lo) / (hi - lo || 1)) * 34).toFixed(1)}`).join(" ");
-    return `<svg viewBox="0 0 300 40" class="spark" preserveAspectRatio="none" aria-hidden="true"><polyline points="${P}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+    return `<svg viewBox="0 0 300 40" class="sigspark" preserveAspectRatio="none" aria-hidden="true"><polyline points="${P}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
   }
 
   // Liten rad överst på Bevakning och Portfölj
@@ -939,7 +939,7 @@
           <div class="small muted signu">${esc(x.nu)}</div><div class="sbar"><i style="width:${x.risk}%;background:${svar(x.status)}"></i></div></summary>
           <p class="small">${esc(x.förklaring)}</p>
           ${x.percentil != null ? `<p class="small muted">Högre än ${pctAbs(x.percentil)} av alla veckor sedan 1990.</p>` : ""}
-          ${spark(x.serie || [], svar(x.status))}${x.serie && x.serie.length > 1 ? `<div class="tiny muted sparkx"><span>3 år sedan</span><span>nu</span></div>` : ""}</details>`;
+          ${sigSpark(x.serie || [], svar(x.status))}${x.serie && x.serie.length > 1 ? `<div class="tiny muted sparkx"><span>3 år sedan</span><span>nu</span></div>` : ""}</details>`;
     const groups = d.grupper.map((g) => `<div class="card"><div class="ghead"><h2>${esc(g.namn)}</h2>${g.poäng != null ? `<span class="pill" style="background:${svar(g.poäng < 35 ? "gron" : g.poäng < 60 ? "gul" : "rod")}">${g.poäng}</span>` : ""}</div>
         <p class="small muted" style="margin:-4px 0 6px">${esc(g.text)}</p>${g.indikatorer.map(sigRow).join("")}</div>`).join("");
     const kr = d.krascher || [], varn = kr.filter((c) => c.varnade).length;

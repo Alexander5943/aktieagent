@@ -302,7 +302,7 @@ ul.pm.plus li span{color:var(--up)} ul.pm.minus li span{color:var(--down)}
 .sbar i{display:block;height:100%;border-radius:3px}
 .sig[open] .sbar{margin-bottom:8px}
 .sig p{margin:6px 0 6px 18px}
-.spark{width:calc(100% - 18px);height:44px;margin-left:18px;display:block}
+.sigspark{width:calc(100% - 18px);height:44px;margin-left:18px;display:block}
 .sparkx{display:flex;justify-content:space-between;margin-left:18px}
 .sig.off{opacity:.6}
 .ktab{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
