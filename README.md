@@ -15,6 +15,7 @@ En privat aktieapp för mobilen. Du kan:
 - **Bevaka egna aktier.** Tryck på stjärnan. AI-analysen uppdateras automatiskt varje måndag.
 - **Topplistor** för tre tidshorisonter: 1–6 månader, 1–3 år och 5–10 år (S&P 500, den 1:a varje månad).
 - **Risknivå 1–10** på varje aktiesida, med skälen bakom.
+- **Krasch-mätaren** (fliken Marknad): 17 varningssignaler (värdering, räntekurva, arbetslöshet, kreditspread, trend, bredd, rädsla m.m.) vägs ihop till en risk 0–100 med råd: köp som vanligt, köp i mindre portioner, var försiktig eller minska risken. Visar också köpläge vid rea/panik, och hur mätaren betett sig före alla ras sedan 1990. Syns som en rad överst på Bevakning och Portfölj. Gratis.
 
 Underlag för egen analys – inte finansiell rådgivning.
 
@@ -25,6 +26,7 @@ Underlag för egen analys – inte finansiell rådgivning.
 | Appen | `docs/` → GitHub Pages | Det du ser i telefonen |
 | Servern | `worker/` → Cloudflare Workers (gratis) | Hämtar data från Yahoo Finance, kör AI, sparar bevakningslistan |
 | Topplistorna | `screener.py` + `modell.py` → GitHub Actions | Körs den 1:a varje månad |
+| Krasch-mätaren | `krasch.py` → GitHub Actions | Varje vardagskväll; mejlar (GitHub-ärende) när läget ändras |
 | Portföljens AI-genomgång | `portfolj_daglig.py` → GitHub Actions | Varje vardagskväll, bara om påslagen i appen |
 
 Servern skyddas av en **app-kod** som bara du känner till. Utan den kan ingen använda servern eller dina AI-krediter, även om appens adress är offentlig.
@@ -58,6 +60,7 @@ node test/test.mjs         # testa servern med låtsasdata
 node test/devserver.mjs    # appen på http://localhost:8787 med låtsasdata (app-kod: hemlig)
 cd ..
 python test_modell.py      # Python-modellen (topplistor) räknar som servern
+python krasch.py --demo    # krasch-mätaren med testdata
 ```
 
 Värderingsmodellen finns på två ställen: `worker/src/analys.js` (appen) och `modell.py` (topplistorna). Ändra båda.

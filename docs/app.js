@@ -91,10 +91,12 @@
     if (current && current.destroy) current.destroy();
     current = null;
     window.scrollTo(0, 0);
-    if (!serverUrl() || !LS.get("key", "")) return viewLogin();
+    if (!serverUrl() || !LS.get("key", "")) { marketBanner(""); return viewLogin(); }
+    marketBanner(page || "bevakning");
     if (page !== "aktie" && page !== "installningar") LS.set("lastTab", page);
     if (page === "sok") return viewSearch();
     if (page === "topp") return viewTop();
+    if (page === "marknad") return viewMarket();
     if (page === "installningar") return viewSettings();
     if (page === "portfolj") return viewPortfolio(arg === "ny" && arg2 ? decodeURIComponent(arg2).toUpperCase() : null);
     if (page === "aktie" && arg) return viewStock(decodeURIComponent(arg).toUpperCase());
@@ -866,6 +868,129 @@
     };
     $("#seg").onclick = (e) => { const b = e.target.closest("button"); if (b) show(b.dataset.k); };
     show(tab);
+  }
+
+  // ---------- Marknad: krasch-mätaren ----------
+  let kraschP = null;
+  const loadKrasch = () => (kraschP = kraschP || fetch("data/krasch.json?" + Date.now()).then((r) => { if (!r.ok) throw new Error(); return r.json(); }).catch((e) => { kraschP = null; throw e; }));
+  const ZON_I = { gron: 0, gul: 1, orange: 2, rod: 3 };
+  const zvar = (z) => `var(--z${ZON_I[z] ?? 0})`;
+  const svar = (s) => (s === "gron" ? "var(--z0)" : s === "gul" ? "var(--z1)" : "var(--z3)");
+  const zonOf = (p, tr) => tr.filter((t) => p >= t).length;
+  const ZNAMN = ["Grönt", "Gult", "Orange", "Rött"];
+  const fmtDag = (iso) => { const d = new Date(iso + "T00:00:00Z"); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}`; };
+
+  function gauge(p, tr) {
+    const pt = (v, r) => { const a = Math.PI * (1 - v / 100); return [100 + r * Math.cos(a), 100 - r * Math.sin(a)]; };
+    const b = [0, ...tr, 100];
+    const arcs = b.slice(0, -1).map((a, i) => {
+      const [x1, y1] = pt(a + (i ? 0.8 : 0), 80), [x2, y2] = pt(b[i + 1] - (i < 3 ? 0.8 : 0), 80);
+      return `<path d="M${x1.toFixed(1)} ${y1.toFixed(1)} A80 80 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}" stroke="var(--z${i})" stroke-width="16" fill="none"/>`;
+    }).join("");
+    const [nx, ny] = pt(Math.max(1, Math.min(99, p)), 64);
+    return `<svg viewBox="0 0 200 108" class="gauge" role="img" aria-label="Krasch-risk ${p} av 100">${arcs}
+      <line x1="100" y1="100" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" stroke="var(--text)" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="100" cy="100" r="7" fill="var(--text)"/></svg>`;
+  }
+
+  function spark(vals, color) {
+    const v = vals.map((x, i) => [i, x]).filter(([, x]) => x != null);
+    if (v.length < 2) return "";
+    const ys = v.map(([, x]) => x), lo = Math.min(...ys), hi = Math.max(...ys), n = vals.length - 1;
+    const P = v.map(([i, x]) => `${((i / n) * 300).toFixed(1)},${(38 - ((x - lo) / (hi - lo || 1)) * 34).toFixed(1)}`).join(" ");
+    return `<svg viewBox="0 0 300 40" class="spark" preserveAspectRatio="none" aria-hidden="true"><polyline points="${P}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+  }
+
+  // Liten rad överst på Bevakning och Portfölj
+  async function marketBanner(page) {
+    const el = $("#mbanner");
+    if (!el) return;
+    if (page !== "bevakning" && page !== "portfolj") { el.innerHTML = ""; return; }
+    try {
+      const d = await loadKrasch();
+      const now = (location.hash.replace(/^#\/?/, "") || "bevakning").split("/")[0];
+      if (now !== page) return;
+      const k = d.köpläge && d.köpläge.nivå;
+      el.innerHTML = `<a class="mbanner" href="#/marknad" style="--zc:${zvar(d.zon)}">
+        <span class="mdot"></span><span class="mtxt"><b>Börsläget: ${esc(d.zonnamn)} ${d.poäng}/100</b><span>${esc(k === "panik" ? "Panik på börsen – historiskt ett köpläge" : k === "rea" ? "Börsen på rea – köp i omgångar" : d.rubrik)}</span></span><span class="mgo">›</span></a>`;
+    } catch { el.innerHTML = ""; }
+  }
+
+  async function viewMarket() {
+    setTop("Marknad");
+    const charts = [];
+    const me = { destroy: () => charts.forEach((c) => c.remove()) };
+    current = me;
+    view.innerHTML = `<div class="card"><div class="skeleton" style="height:260px"></div></div>`;
+    let d;
+    try { d = await loadKrasch(); }
+    catch { if (current === me) view.innerHTML = `<div class="card empty"><p><b>Krasch-mätaren har inte räknats än</b></p><p class="small">Den räknas om varje vardagskväll efter att börsen stängt.</p></div>`; return; }
+    if (current !== me) return;
+    const h = d.historiskt || {}, b = d.bas || {}, k = d.köpläge || {}, a = d.antal || {};
+    const ch = d.förändring;
+    const kopText = k.nivå === "panik"
+      ? `<b>Panik på börsen.</b> S&P 500 har fallit ${pctAbs(k.fall)} från toppen och rädslan (VIX ${num(k.vix, 0)}) är hög. Historiskt har det ofta varit ett bra läge att köpa – i omgångar, t.ex. en fjärdedel i månaden.${k.panik ? ` Efter sådana veckor gick börsen i snitt ${pct(k.panik.snitt12, 0)} nästa år och steg i ${pctAbs(k.panik.andel_upp)} av fallen.` : ""}`
+      : k.nivå === "rea"
+      ? `<b>Börsen är på rea.</b> S&P 500 har fallit ${pctAbs(k.fall)} och många är oroliga. Köp gärna i omgångar i stället för allt på en gång.${k.rea ? ` Efter sådana veckor gick börsen i snitt ${pct(k.rea.snitt12, 0)} nästa år (upp i ${pctAbs(k.rea.andel_upp)} av fallen).` : ""}`
+      : "";
+    const sigRow = (x) => x.saknas
+      ? `<div class="sig off"><div class="sighead"><span class="sdot" style="background:var(--line)"></span><b>${esc(x.namn)}</b><span class="small muted">saknar data idag</span></div></div>`
+      : `<details class="sig"><summary><div class="sighead"><span class="sdot" style="background:${svar(x.status)}"></span><b>${esc(x.namn)}</b><span class="srisk">${x.risk}</span></div>
+          <div class="small muted signu">${esc(x.nu)}</div><div class="sbar"><i style="width:${x.risk}%;background:${svar(x.status)}"></i></div></summary>
+          <p class="small">${esc(x.förklaring)}</p>
+          ${x.percentil != null ? `<p class="small muted">Högre än ${pctAbs(x.percentil)} av alla veckor sedan 1990.</p>` : ""}
+          ${spark(x.serie || [], svar(x.status))}${x.serie && x.serie.length > 1 ? `<div class="tiny muted sparkx"><span>3 år sedan</span><span>nu</span></div>` : ""}</details>`;
+    const groups = d.grupper.map((g) => `<div class="card"><div class="ghead"><h2>${esc(g.namn)}</h2>${g.poäng != null ? `<span class="pill" style="background:${svar(g.poäng < 35 ? "gron" : g.poäng < 60 ? "gul" : "rod")}">${g.poäng}</span>` : ""}</div>
+        <p class="small muted" style="margin:-4px 0 6px">${esc(g.text)}</p>${g.indikatorer.map(sigRow).join("")}</div>`).join("");
+    const kr = d.krascher || [], varn = kr.filter((c) => c.varnade).length;
+    const yr = (iso) => `${MON[+iso.slice(5, 7) - 1]} ${iso.slice(0, 4)}`;
+    view.innerHTML = `
+      <div class="card mhero" style="--zc:${zvar(d.zon)}">
+        <h2>Krasch-mätaren</h2>
+        <div class="gwrap">${gauge(d.poäng, d.trösklar)}<div class="gnum"><b>${d.poäng}</b><span>/100</span></div></div>
+        <div class="gzon"><span class="pill" style="background:var(--zc)">${esc(d.zonnamn)}</span>${ch != null && ch !== 0 ? `<span class="tiny ${ch > 0 ? "down" : "up"}">${ch > 0 ? "▲" : "▼"} ${Math.abs(ch)} på 4 veckor</span>` : ""}</div>
+        <p class="mrubrik">${esc(d.rubrik)}</p>
+        <p style="margin:4px 0 10px">${esc(d.råd)}</p>
+        ${h.krasch != null ? `<div class="callout">Förr när mätaren visat <b>${esc(d.zonnamn.toLowerCase())}</b> föll börsen minst 15 % inom ett år i <b>${pctAbs(h.krasch)}</b> av fallen (alla veckor: ${pctAbs(b.krasch)}). Snittet för börsen året efter var <b>${pct(h.snitt12, 0)}</b>.</div>` : ""}
+        <div class="mcount"><span><i style="background:var(--z3)"></i>${a.rod} röda</span><span><i style="background:var(--z1)"></i>${a.gul} gula</span><span><i style="background:var(--z0)"></i>${a.gron} gröna</span></div>
+        <p class="tiny muted" style="margin:8px 0 0">${a.totalt} signaler · uppdaterad ${esc(fmtDag(d.uppdaterad))} · räknas om varje vardagskväll${d.demo ? " · TESTDATA" : ""}</p>
+      </div>
+      ${kopText ? `<div class="card"><h2>Köpläge</h2><div class="callout">${kopText}</div></div>`
+        : `<p class="small muted" style="margin:0 4px">Köpläge: inget just nu. S&P 500 är ${pctAbs(k.fall || 0)} från toppen senaste året. Rea = fall över 10 % med oro, panik = fall över 20 % med stor rädsla.</p>`}
+      ${groups}
+      <div class="card"><h2>Mätaren och börsen sedan 1990</h2>
+        <p class="small muted" style="margin:-4px 0 6px">Överst S&P 500, under mätaren. Färgerna visar zonerna.</p>
+        <div id="kspx"></div><div id="kscore"></div></div>
+      <div class="card"><h2>Har mätaren varnat förut?</h2>
+        <p class="small">Alla ras på minst 15 % sedan 1990. Mätaren varnade (orange eller rött) under halvåret före toppen i <b>${varn} av ${kr.length}</b>.</p>
+        <table class="ktab"><thead><tr><th>Topp</th><th>Fall</th><th>Mätaren före</th></tr></thead><tbody>
+        ${kr.map((c) => `<tr><td>${esc(yr(c.topp))}</td><td class="down">${pct(c.fall, 0)}</td><td>${c.fore == null ? "–" : `<span class="pill" style="background:var(--z${zonOf(c.fore, d.trösklar)})">${c.fore}</span> ${c.varnade ? "✓" : ""}`}</td></tr>`).join("")}
+        </tbody></table>
+        <h2 style="margin-top:16px">Vad hände efter varje läge?</h2>
+        <table class="ktab"><thead><tr><th>Läge</th><th>Av tiden</th><th>Börsen året efter</th><th>Ras ≥15 %</th></tr></thead><tbody>
+        ${d.zoner.map((z) => `<tr><td><span class="pill" style="background:${zvar(z.zon)}">${esc(z.namn)}</span></td><td>${pctAbs(z.andel)}</td><td class="${cls(z.snitt12)}">${z.snitt12 == null ? "–" : pct(z.snitt12, 0)}</td><td>${z.krasch == null ? "–" : pctAbs(z.krasch)}</td></tr>`).join("")}
+        </tbody></table>
+        <p class="tiny muted">Räknat bakåt med samma regler. Siffror som publiceras i efterhand (t.ex. arbetslöshet) används först från dagen de blev kända.</p>
+      </div>
+      <p class="disclaimer">Ingen kan förutse ras säkert. Mätaren visar hur riskabelt läget ser ut jämfört med historien – den kan varna i onödan och missa plötsliga ras (som corona 2020). Källor: FRED (St. Louis Fed) och Yahoo Finance. Inte finansiell rådgivning.</p>`;
+
+    // Historikgrafer
+    if (window.LightweightCharts && d.historik && d.historik.datum.length) {
+      const css = getComputedStyle(document.documentElement), col = (v) => css.getPropertyValue(v).trim();
+      const H = d.historik, zc = [0, 1, 2, 3].map((i) => col(`--z${i}`));
+      const mk = (id, h) => { const el = $(id); const c = LightweightCharts.createChart(el, lwOptions(el, col, h)); charts.push(c); return c; };
+      const c1 = mk("#kspx", 170);
+      c1.priceScale("right").applyOptions({ mode: 1 });
+      c1.addLineSeries({ color: col("--text"), lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false })
+        .setData(H.datum.map((t, i) => ({ time: t, value: H.spx[i] })));
+      c1.timeScale().fitContent();
+      const c2 = mk("#kscore", 130);
+      const hs = c2.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false, priceFormat: { type: "price", precision: 0, minMove: 1 } });
+      hs.setData(H.datum.map((t, i) => H.poäng[i] == null ? { time: t } : { time: t, value: H.poäng[i], color: zc[zonOf(H.poäng[i], d.trösklar)] }));
+      c2.priceScale("right").applyOptions({ autoScale: false, scaleMargins: { top: 0.05, bottom: 0 } });
+      hs.applyOptions({ autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) });
+      c2.timeScale().fitContent();
+    }
   }
 
   // ---------- Portfölj ----------
