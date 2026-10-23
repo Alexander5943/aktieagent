@@ -1,0 +1,50 @@
+name: Krasch-mätaren
+
+# Varje vardagskväll efter att börsen i New York stängt. Gratis (ingen AI).
+# När läget ändras (t.ex. Gult -> Orange) skapas ett GitHub-ärende, som GitHub mejlar till dig.
+on:
+  schedule:
+    - cron: "15 22 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency: krasch
+
+jobs:
+  matare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installera
+        run: pip install -r requirements.txt
+
+      - name: Räkna krasch-risken
+        id: k
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python krasch.py
+
+      - name: Spara
+        run: |
+          git config user.name "aktieagent"
+          git config user.email "aktieagent@users.noreply.github.com"
+          git add docs/data/krasch.json
+          git diff --cached --quiet || git commit -m "Krasch-mätaren $(date +%Y-%m-%d)"
+          for i in 1 2 3; do git pull --rebase origin main && git push && break; sleep 10; done
+
+      - name: Mejla om läget ändrats
+        if: steps.k.outputs.larm == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITEL: ${{ steps.k.outputs.titel }}
+        run: gh issue create --title "$TITEL" --body-file larm.md --assignee "${{ github.repository_owner }}"
