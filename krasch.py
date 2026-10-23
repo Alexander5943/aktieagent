@@ -426,7 +426,8 @@ def krascher(spx, score, grans):
     for d, v in spx.items():
         if not np.isfinite(v):
             continue
-        if v >= peak:
+        # Ett ras räknas som slut när börsen nått förra toppen igen eller stigit 25 % från botten
+        if v >= peak or (inside and v >= trough * 1.25):
             if inside:
                 out.append((pdate, tdate, trough / peak - 1))
                 inside = False
@@ -500,6 +501,10 @@ def main():
         zf = [z[0] for z in ZONER].index(forra["zon"])
     zi = zon_index(p_nu, zf)
     zid, znamn, rubrik, rad = ZONER[zi]
+    if bool(panik.iloc[i]):
+        rubrik, rad = "Sälj inte i panik", "Börsen har redan rasat och många är rädda. Historiskt har det ofta varit ett bra läge att köpa – i omgångar."
+    elif bool(rea.iloc[i]) and zi >= 2:
+        rad += " Börsen har redan fallit en del, så sälj inte allt – köp hellre tillbaka i omgångar när läget lugnat sig."
     i4 = max(0, i - 4)
 
     grupper = []

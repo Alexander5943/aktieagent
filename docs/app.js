@@ -963,9 +963,10 @@
         <div id="kspx"></div><div id="kscore"></div></div>
       <div class="card"><h2>Har mätaren varnat förut?</h2>
         <p class="small">Alla ras på minst 15 % sedan 1990. Mätaren varnade (orange eller rött) under halvåret före toppen i <b>${varn} av ${kr.length}</b>.</p>
-        <table class="ktab"><thead><tr><th>Topp</th><th>Fall</th><th>Mätaren före</th></tr></thead><tbody>
-        ${kr.map((c) => `<tr><td>${esc(yr(c.topp))}</td><td class="down">${pct(c.fall, 0)}</td><td>${c.fore == null ? "–" : `<span class="pill" style="background:var(--z${zonOf(c.fore, d.trösklar)})">${c.fore}</span> ${c.varnade ? "✓" : ""}`}</td></tr>`).join("")}
+        <table class="ktab"><thead><tr><th>Topp</th><th>Fall</th><th>Mätaren före</th><th>Larm*</th></tr></thead><tbody>
+        ${kr.map((c) => `<tr><td>${esc(yr(c.topp))}</td><td class="down">${pct(c.fall, 0)}</td><td>${c.fore == null ? "–" : `<span class="pill" style="background:var(--z${zonOf(c.fore, d.trösklar)})">${c.fore}</span> ${c.varnade ? "✓" : ""}`}</td><td>${c.varnade ? "före" : c.larm_efter == null ? "–" : pct(c.larm_efter, 0)}</td></tr>`).join("")}
         </tbody></table>
+        <p class="tiny muted">*Larm = hur mycket börsen hade fallit när mätaren nådde orange. "före" = den varnade redan innan toppen.</p>
         <h2 style="margin-top:16px">Vad hände efter varje läge?</h2>
         <table class="ktab"><thead><tr><th>Läge</th><th>Av tiden</th><th>Börsen året efter</th><th>Ras ≥15 %</th></tr></thead><tbody>
         ${d.zoner.map((z) => `<tr><td><span class="pill" style="background:${zvar(z.zon)}">${esc(z.namn)}</span></td><td>${pctAbs(z.andel)}</td><td class="${cls(z.snitt12)}">${z.snitt12 == null ? "–" : pct(z.snitt12, 0)}</td><td>${z.krasch == null ? "–" : pctAbs(z.krasch)}</td></tr>`).join("")}
