@@ -9,7 +9,7 @@
     set: (k, v) => { try { localStorage.setItem("aktie." + k, JSON.stringify(v)); } catch {} },
     del: (k) => { try { localStorage.removeItem("aktie." + k); } catch {} },
   };
-  const serverUrl = () => (LS.get("server", "") || CFG.workerUrl || "").replace(/\/+$/, "");
+  const serverUrl = () => (CFG.workerUrl || LS.get("server", "") || "").replace(/\/+$/, "");
   const $ = (s, el = document) => el.querySelector(s);
   const view = $("#view");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
