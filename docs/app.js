@@ -573,7 +573,11 @@
   const aiLoading = (msg) => `<div class="card" id="ai"><h2>AI-bedömning</h2>
     <p class="small muted" style="display:flex;gap:10px;align-items:center"><span class="spinner" style="flex-shrink:0"></span>${msg}</p></div>`;
 
-  function aiCard(a, s) {
+  function aiCard(a, s, av = false) {
+    if (av && (!a || a.saknas)) {
+      return `<div class="card" id="ai"><h2>AI-bedömning</h2>
+        <p class="small muted">AI:n är avstängd för att spara pengar. Allt annat på sidan – graf, förväntad avkastning, köp- och säljkurser, värdering, ägare och risk – är gratis och fungerar som vanligt.</p></div>`;
+    }
     if (!a || a.saknas) {
       return `<div class="card" id="ai"><h2>AI-bedömning</h2>
         <p class="small muted">AI:n läser bolagets senaste rapport och nyheter på webben. Den bedömer värdering, hype och vad som är inprisat, och tar fram affärsidé, mål och viktiga kontrakt. Tar 30–90 sekunder och kostar ungefär 1–2 kr.</p>
@@ -780,8 +784,8 @@
     refresh();
 
     // AI-del
-    const showAI = (a) => {
-      $("#aiwrap").innerHTML = aiCard(a, s);
+    const showAI = (a, av = false) => {
+      $("#aiwrap").innerHTML = aiCard(a, s, av);
       if ($("#qai")) $("#qai").outerHTML = a && !a.saknas ? `<button class="qchip" id="qai" data-sec="sec-ai"><span>AI</span><b class="pill ${pillCls(a.betyg)}">${esc(a.betyg)}</b></button>` : `<span id="qai"></span>`;
       if ($("#aibolag")) $("#aibolag").innerHTML = aiBolag(a);
       const b = $("#runai"); if (b) b.onclick = () => runAI(true);
@@ -800,6 +804,9 @@
       const a = await api("/api/ai?t=" + encodeURIComponent(t));
       if (gone()) return;
       const stale = !a.saknas && Date.now() - a.analyserad > 7 * 86400e3;
+      const av = await aiOff();
+      if (gone()) return;
+      if (av) { showAI(a, true); return; }
       if ((a.saknas || stale) && LS.get("autoAI", true)) return runAI(false);
       showAI(a);
     } catch (e) { if (!gone()) showAI(null); }
@@ -1189,10 +1196,13 @@
     }
 
     const freshAdvice = () => advice && !advice.saknas && advice.portfölj === portfolio.map((x) => `${x.t}:${x.andel ?? ""}:${x.antal ?? ""}`).sort().join(",");
+    let aiAv = false;
+    aiOff().then((v) => { aiAv = v; if (v && !gone()) renderAI(); });
     function renderAI() {
       const el = $("#pai");
       if (!portfolio.length) { el.innerHTML = ""; return; }
-      const toggle = `<label class="switch"><span>Daglig AI-genomgång<br><span class="small muted">Varje vardagskväll efter börsens stängning. Ungefär 1 kr per gång (cirka 20 kr i månaden).</span></span>
+      if (aiAv && (!advice || advice.saknas)) { el.innerHTML = ""; return; }
+      const toggle = aiAv ? "" : `<label class="switch"><span>Daglig AI-genomgång<br><span class="small muted">Varje vardagskväll efter börsens stängning. Ungefär 1 kr per gång (cirka 20 kr i månaden).</span></span>
         <input type="checkbox" id="dagligai" ${settings.dagligAI ? "checked" : ""}></label>`;
       let body;
       if (aiBusy) body = `<p class="small muted" style="display:flex;gap:10px;align-items:center"><span class="spinner" style="flex-shrink:0"></span>AI:n går igenom dina innehav och jämför med topplistorna. Tar 20–60 sekunder.</p>`;
@@ -1210,8 +1220,9 @@
           <p class="tiny muted" style="margin:10px 0">${advice.automatisk ? "Automatisk genomgång" : "Gjord"} ${esc(ago(advice.skapad))}.</p>
           <button class="btn sec" id="runadv">Gör en ny genomgång (ca 1 kr)</button>`;
       }
-      el.innerHTML = `<div class="card"><h2>AI-genomgång av portföljen</h2>${body}<div style="margin-top:12px;border-top:1px solid var(--line)">${toggle}</div></div>`;
-      $("#dagligai").onchange = async (e) => {
+      el.innerHTML = `<div class="card"><h2>AI-genomgång av portföljen</h2>${body}${toggle ? `<div style="margin-top:12px;border-top:1px solid var(--line)">${toggle}</div>` : `<p class="tiny muted">AI är avstängd – detta är den senaste genomgången.</p>`}</div>`;
+      if (aiAv && $("#runadv")) $("#runadv").remove();
+      if ($("#dagligai")) $("#dagligai").onchange = async (e) => {
         try { settings = await api("/api/portfolio/settings", { method: "POST", body: { dagligAI: e.target.checked } }); toast(settings.dagligAI ? "Daglig AI-genomgång på" : "Daglig AI-genomgång av"); }
         catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
       };
@@ -1327,12 +1338,16 @@
     } catch (e) { toast(e.message); }
   }
 
+  let pingP = null;
+  const aiOff = () => (pingP = pingP || api("/api/ping").catch((e) => { pingP = null; throw e; })).then((p) => !!p.aiAv).catch(() => false);
+
   // ---------- Inställningar ----------
   function viewSettings() {
     setTop("Inställningar", "", true);
     view.innerHTML = `
       <div class="card"><h2>AI</h2>
-        <label class="switch"><span>Analysera automatiskt när jag öppnar en aktie<br><span class="small muted">Varje ny analys kostar ungefär 1–2 kr. En analys sparas i 7 dagar.</span></span>
+        <p class="small" id="aiavtext" hidden><span class="pill neutral">Avstängd</span> All AI är avstängd för att spara pengar. Inget i appen drar krediter. Gamla AI-analyser visas fortfarande.</p>
+        <label class="switch" id="autorow"><span>Analysera automatiskt när jag öppnar en aktie<br><span class="small muted">Varje ny analys kostar ungefär 1–2 kr. En analys sparas i 7 dagar.</span></span>
           <input type="checkbox" id="auto" ${LS.get("autoAI", true) ? "checked" : ""}></label>
       </div>
       <div class="card" id="skydd"><h2>Skydd</h2><p class="small muted">Kontrollerar …</p></div>
@@ -1346,6 +1361,7 @@
       </div>`;
     $("#auto").onchange = (e) => { LS.set("autoAI", e.target.checked); toast(e.target.checked ? "Automatisk AI-analys på" : "Automatisk AI-analys av"); };
     $("#logout").onclick = () => { LS.del("key"); route(); };
+    aiOff().then((av) => { if (av && $("#aiavtext")) { $("#aiavtext").hidden = false; $("#autorow").hidden = true; } });
     api("/api/ping").then((p) => {
       const el = $("#skydd"); if (!el) return;
       el.innerHTML = `<h2>Skydd</h2>

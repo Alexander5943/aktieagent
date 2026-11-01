@@ -17,7 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v5
@@ -33,9 +32,9 @@ jobs:
       - name: Kontrollera att modellen räknar likadant som servern
         run: python test_modell.py
 
-      - name: Screener (S&P 500, AI på topp 10 för 1–3 år)
+      - name: Screener (S&P 500, utan AI – kostar inget)
         run: |
-          python screener.py --ai-top 10 --out-dir docs/rapporter
+          python screener.py --ai-top 0 --out-dir docs/rapporter
           python screener.py --utvardera > docs/utvardering.txt || true
 
       - name: Uppdatera appens data

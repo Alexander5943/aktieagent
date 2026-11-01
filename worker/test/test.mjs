@@ -204,6 +204,16 @@ await test("AI: dagsgräns", async () => {
   assert.equal(r.status, 429);
 });
 
+await test("AI avstängd: inga anrop till Claude", async () => {
+  installMocks();
+  const env = makeEnv({ AI_AV: "1" });
+  const n = calls.filter((u) => u.includes("anthropic")).length;
+  assert.equal((await call(env, "/api/ai?t=AAPL", { method: "POST" })).status, 403);
+  assert.notEqual((await call(env, "/api/portfolio/advice", { method: "POST", body: { innehav: [{ t: "NVDA", andel: 1 }] } })).status, 200);
+  assert.equal(calls.filter((u) => u.includes("anthropic")).length, n);
+  assert.equal((await (await call(env, "/api/ping")).json()).aiAv, true);
+});
+
 await test("portfölj: lägg till, ändra, ta bort, felaktiga värden", async () => {
   installMocks();
   const env = makeEnv();

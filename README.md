@@ -47,6 +47,8 @@ När de finns kör du **Actions → Uppdatera servern → Run workflow**. Server
 
 ## Kostnad
 
+**All AI är avstängd just nu** (`AI_AV: "1"` i `worker/wrangler.jsonc`). Appen drar då inga krediter. Slå på igen: ändra till `"0"` och kör "Uppdatera servern". Måndagsuppdateringen och portföljens dagliga AI-genomgång körs bara manuellt, och topplistan görs utan AI.
+
 - GitHub och Cloudflare: gratis.
 - AI: ungefär 1–2 kr per analys (Claude Opus och webbsökning). En analys sparas i 7 dagar och kostar inget att visa igen.
 - Inbyggt skydd: högst 25 nya AI-analyser per dag (ändras i `worker/wrangler.jsonc`).

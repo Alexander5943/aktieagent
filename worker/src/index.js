@@ -40,7 +40,7 @@ export default {
       }
 
       const p = url.pathname;
-      if (p === "/api/ping") return json({ ok: true, model: MODEL, svagKod: env.APP_KEY.length < 16 });
+      if (p === "/api/ping") return json({ ok: true, model: MODEL, svagKod: env.APP_KEY.length < 16, aiAv: env.AI_AV === "1" });
       if (p === "/api/search") return json(await search(url.searchParams.get("q") || "", ctx));
       if (p === "/api/quotes") return json(await quotes((url.searchParams.get("symbols") || "").split(","), ctx));
       if (p === "/api/stock") return json(await stock(ticker(url), env, ctx));
@@ -402,6 +402,7 @@ const VERDICT_TOOL = {
 
 // Dagsgräns så att krediterna inte tar slut av misstag
 async function countAI(env, fromCron = false) {
+  if (env.AI_AV === "1") throw httpError("AI är avstängd för att spara pengar. Allt annat i appen fungerar som vanligt.", 403);
   const day = new Date().toISOString().slice(0, 10);
   const limit = Number(env.AI_DAILY_LIMIT || DEFAULT_AI_DAILY_LIMIT);
   const used = Number((await env.AKTIE_KV.get("aicount:" + day)) || 0);

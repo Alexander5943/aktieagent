@@ -2,9 +2,8 @@ name: AI-uppdatering av bevakningslistan
 
 # Varje måndag morgon: nya AI-analyser för bevakade aktier som är äldre än 6 dagar.
 # Högst 9 aktier i veckan (ca 1–2 kr styck).
+# AVSTÄNGD för att spara pengar. Startas bara manuellt.
 on:
-  schedule:
-    - cron: "7 5 * * 1"
   workflow_dispatch:
 
 permissions:

@@ -4,7 +4,7 @@
   "main": "src/index.js",
   "compatibility_date": "2026-09-01",
   "kv_namespaces": [{ "binding": "AKTIE_KV" }],
-  // Varje måndag 05:00, 06:00 och 07:00 UTC uppdateras AI-analysen för bevakningslistan (3 aktier per körning)
   "triggers": { "crons": [] },  // måndagens AI-uppdatering körs från GitHub (ai_vecka.py)
-  "vars": { "AI_DAILY_LIMIT": "25" }
+  // AI_AV "1" = all AI avstängd (kostar inget). Ändra till "0" för att slå på igen.
+  "vars": { "AI_DAILY_LIMIT": "25", "AI_AV": "1" }
 }
