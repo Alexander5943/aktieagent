@@ -7,6 +7,10 @@ on:
       ticker:
         description: "Aktie att kontrollera"
         default: "NVDA"
+      testa_ai:
+        description: "Kör en ny AI-analys av aktien (kostar ca 1–2 kr)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -14,7 +18,7 @@ permissions:
 jobs:
   kontroll:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - name: Fråga servern
@@ -50,4 +54,25 @@ jobs:
               a = json.load(urllib.request.urlopen(urllib.request.Request(f"{url}/api/ai?t={w['t']}", headers=H), timeout=30))
               rader.append(f"{w['t']}: " + ("SAKNAS" if a.get("saknas") else f"{(time.time()*1000 - a['analyserad'])/86400e3:.1f} dagar sedan ({a.get('betyg')})"))
           print("::notice title=AI-analyser (bevakning)::" + " | ".join(rader))
+          PY
+
+      - name: Testa AI-analys
+        if: inputs.testa_ai
+        env:
+          APP_KEY: ${{ secrets.APP_KEY }}
+          T: ${{ inputs.ticker }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, time, urllib.request, urllib.error
+          url = re.search(r'workerUrl:\s*"([^"]+)"', open("docs/config.js").read()).group(1)
+          H = {"X-App-Key": os.environ["APP_KEY"], "User-Agent": "aktieagent-kontroll"}
+          t0 = time.time()
+          try:
+              r = urllib.request.urlopen(urllib.request.Request(f"{url}/api/ai?t={os.environ['T']}&force=1", method="POST", headers=H), timeout=300)
+              a = json.load(r)
+              print(f"::notice title=AI-test OK::{time.time()-t0:.0f} s · {a.get('betyg')} · {len(a.get('källor') or [])} källor · {a.get('kort','')[:200]}")
+          except urllib.error.HTTPError as e:
+              print(f"::error title=AI-test fel {e.code} efter {time.time()-t0:.0f} s::{e.read().decode(errors='replace')[:800]}")
+          except Exception as e:
+              print(f"::error title=AI-test avbröts efter {time.time()-t0:.0f} s::{e}")
           PY
