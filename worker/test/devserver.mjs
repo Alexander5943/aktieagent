@@ -6,7 +6,7 @@ import { installMocks, makeEnv, ctx } from "./mock.mjs";
 
 installMocks();
 const worker = (await import("../src/index.js")).default;
-const env = makeEnv();
+const env = makeEnv(process.env.AI_AV ? { AI_AV: process.env.AI_AV } : {});
 const DOCS = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../docs");
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".png": "image/png", ".webmanifest": "application/manifest+json" };
 
