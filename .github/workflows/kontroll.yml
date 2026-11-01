@@ -42,4 +42,12 @@ jobs:
           sig = json.load(urllib.request.urlopen(urllib.request.Request(f"{url}/api/signal?t={os.environ['T']}", headers={"X-App-Key": os.environ["APP_KEY"], "User-Agent": "aktieagent-kontroll"}), timeout=60))
           print(f"::notice title=Signal::pris {sig.get('pris')} kursmål 3 år {(sig.get('horisonter') or {}).get('3')} utdelning {sig.get('utdelning')}")
           print(f"::notice title=App-kod::{'KORT (under 16 tecken)' if ping.get('svagKod') else 'stark'}")
+          import time
+          H = {"X-App-Key": os.environ["APP_KEY"], "User-Agent": "aktieagent-kontroll"}
+          wl = json.load(urllib.request.urlopen(urllib.request.Request(f"{url}/api/watchlist", headers=H), timeout=30))
+          rader = []
+          for w in wl[:25]:
+              a = json.load(urllib.request.urlopen(urllib.request.Request(f"{url}/api/ai?t={w['t']}", headers=H), timeout=30))
+              rader.append(f"{w['t']}: " + ("SAKNAS" if a.get("saknas") else f"{(time.time()*1000 - a['analyserad'])/86400e3:.1f} dagar sedan ({a.get('betyg')})"))
+          print("::notice title=AI-analyser (bevakning)::" + " | ".join(rader))
           PY
