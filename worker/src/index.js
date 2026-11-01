@@ -19,7 +19,6 @@ const MODEL = "claude-opus-5-5";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 const AI_CACHE_DAYS = 7;          // en AI-analys återanvänds i 7 dagar om du inte ber om en ny
 const DEFAULT_AI_DAILY_LIMIT = 25; // skydd mot att krediterna tar slut av misstag
-const CRON_MAX_STOCKS = 3;         // per körning (måndag kl 05, 06 och 07 UTC = högst 9 i veckan). Gratisplanen tillåter 50 anrop per körning
 
 // ---------------------------------------------------------------------------
 // Router
@@ -61,20 +60,6 @@ export default {
       return json({ error: "Okänd adress." }, 404);
     } catch (e) {
       return json({ error: e.message || String(e) }, e.status || 500);
-    }
-  },
-
-  // Varje måndag (två körningar): uppdatera AI-analysen för bevakningslistan, äldsta först
-  async scheduled(event, env, ctx) {
-    const list = await getWatchlist(env);
-    const withAge = await Promise.all(list.map(async (w) => {
-      const c = await env.AKTIE_KV.get("ai:" + w.t, "json");
-      return { t: w.t, at: c ? c.analyserad : 0 };
-    }));
-    withAge.sort((a, b) => a.at - b.at);
-    const due = withAge.filter((w) => Date.now() - w.at > 6 * 86400e3);
-    for (const w of due.slice(0, CRON_MAX_STOCKS)) {
-      try { await runAI(w.t, env, ctx, true, true); } catch (e) { console.log("cron", w.t, e.message); }
     }
   },
 };

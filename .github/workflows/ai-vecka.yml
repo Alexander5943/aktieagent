@@ -1,0 +1,28 @@
+name: AI-uppdatering av bevakningslistan
+
+# Varje måndag morgon: nya AI-analyser för bevakade aktier som är äldre än 6 dagar.
+# Högst 9 aktier i veckan (ca 1–2 kr styck).
+on:
+  schedule:
+    - cron: "7 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency: ai-vecka
+
+jobs:
+  uppdatera:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Uppdatera AI-analyser
+        env:
+          APP_KEY: ${{ secrets.APP_KEY }}
+          PYTHONIOENCODING: utf-8
+        run: python -u ai_vecka.py

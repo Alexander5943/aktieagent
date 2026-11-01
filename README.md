@@ -27,6 +27,7 @@ Underlag för egen analys – inte finansiell rådgivning.
 | Servern | `worker/` → Cloudflare Workers (gratis) | Hämtar data från Yahoo Finance, kör AI, sparar bevakningslistan |
 | Topplistorna | `screener.py` + `modell.py` → GitHub Actions | Körs den 1:a varje månad |
 | Krasch-mätaren | `krasch.py` → GitHub Actions | Varje vardagskväll; mejlar (GitHub-ärende) när läget ändras |
+| AI-uppdatering | `ai_vecka.py` → GitHub Actions | Varje måndag: nya AI-analyser för bevakade aktier äldre än 6 dagar (högst 9) |
 | Portföljens AI-genomgång | `portfolj_daglig.py` → GitHub Actions | Varje vardagskväll, bara om påslagen i appen |
 
 Servern skyddas av en **app-kod** som bara du känner till. Utan den kan ingen använda servern eller dina AI-krediter, även om appens adress är offentlig.

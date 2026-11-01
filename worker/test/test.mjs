@@ -204,18 +204,6 @@ await test("AI: dagsgräns", async () => {
   assert.equal(r.status, 429);
 });
 
-await test("måndagskörning uppdaterar bevakningslistan", async () => {
-  installMocks();
-  const env = makeEnv();
-  for (const t of ["NVDA", "MU"]) await call(env, "/api/watchlist", { method: "POST", body: { action: "add", t } });
-  await worker.scheduled({}, env, ctx);
-  assert.ok(env._kv.has("ai:NVDA") && env._kv.has("ai:MU"));
-  // Färska analyser görs inte om
-  const n = calls.filter((u) => u.includes("anthropic")).length;
-  await worker.scheduled({}, env, ctx);
-  assert.equal(calls.filter((u) => u.includes("anthropic")).length, n);
-});
-
 await test("portfölj: lägg till, ändra, ta bort, felaktiga värden", async () => {
   installMocks();
   const env = makeEnv();
