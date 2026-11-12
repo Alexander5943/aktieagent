@@ -4,3 +4,4 @@ matplotlib
 pandas
 numpy
 lxml
+scikit-learn
