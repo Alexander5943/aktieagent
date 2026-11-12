@@ -66,3 +66,5 @@ jobs:
           git add docs/data/algoritm.json
           git diff --cached --quiet || git commit -m "Algoritmen $(date +%Y-%m-%d)"
           for i in 1 2 3; do git pull --rebase origin main && git push && break; sleep 10; done
+          # Städa bort den tillfälliga grenen med kursdata om den finns kvar från utveckling
+          git push origin --delete data-tmp 2>/dev/null || true
