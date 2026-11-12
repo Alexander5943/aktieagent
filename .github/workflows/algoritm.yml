@@ -46,13 +46,17 @@ jobs:
         run: python -u algoritm.py ${{ (github.event_name == 'workflow_dispatch' && !inputs.spara) && '--out /tmp/algoritm.json' || '' }} ${{ (github.event_name == 'workflow_dispatch' && inputs.data) && '--spara-data /tmp/kurser.npz --utan-ovriga' || '' }}
         timeout-minutes: 35
 
-      - name: Ladda upp kursdata
+      - name: Lägg kursdatan på en tillfällig gren
         if: github.event_name == 'workflow_dispatch' && inputs.data
-        uses: actions/upload-artifact@v5
-        with:
-          name: kurser
-          path: /tmp/kurser.npz
-          retention-days: 3
+        run: |
+          git config user.name "aktieagent"
+          git config user.email "aktieagent@users.noreply.github.com"
+          git checkout -q --orphan data-tmp
+          git rm -rfq .
+          cp /tmp/kurser.npz .
+          git add kurser.npz
+          git commit -qm "Kursdata för utveckling (tillfällig)"
+          git push -f origin data-tmp
 
       - name: Spara
         if: github.event_name != 'workflow_dispatch' || inputs.spara

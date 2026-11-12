@@ -655,7 +655,7 @@ def uppdatera_portfolj(st: dict | None, datum: str, avk, index_avk, ordning: lis
 # ---------------------------------------------------------------------------
 def spara_data(fil, C, V, spy, medl, hist):
     np.savez_compressed(fil, C=C.to_numpy(np.float32), V=V.reindex(index=C.index, columns=C.columns).to_numpy(np.float32), spy=spy.reindex(C.index).to_numpy(float),
-                        datum=C.index.strftime("%Y-%m-%d").to_numpy(), tick=np.array(C.columns), medl=json.dumps(medl, ensure_ascii=False),
+                        datum=C.index.strftime("%Y-%m-%d").to_numpy().astype("U10"), tick=np.array(C.columns, dtype="U8"), medl=json.dumps(medl, ensure_ascii=False),
                         hist=json.dumps([[d.strftime("%Y-%m-%d"), sorted(ts)] for d, ts in hist]))
 
 
