@@ -1029,7 +1029,7 @@
   }
   const algoSlutsats = (T) => {
     const d = T.algoritm.cagr - T.index.cagr, ras = T.algoritm.maxdd < T.index.maxdd - 0.02;
-    if (Math.abs(d) < 0.03) return `<b>Slutsats: ungefär som index.</b> Algoritmen gick ${pct(Math.abs(d), 1, false)} ${d >= 0 ? "bättre" : "sämre"} per år i testet${ras ? ", med större ras" : ""}. Skillnaden är så liten att den kan vara tur. Räkna inte med att den slår börsen.`;
+    if (Math.abs(d) < 0.03) return `<b>Slutsats: ungefär som index.</b> ${pct(T.algoritm.cagr)} per år mot ${pct(T.index.cagr)} för index är en så liten skillnad att den kan vara slump${ras ? ", och rasen var större" : ""}. Räkna inte med att algoritmen slår börsen.`;
     return d > 0 ? `<b>Slutsats: bättre än index i testet, men osäkert.</b> Algoritmen gick ${pct(d, 1, false)} bättre per år${ras ? ", med större ras" : ""}. Testet är snällare än verkligheten (se nedan), så räkna inte med samma resultat framöver.`
       : `<b>Slutsats: sämre än index.</b> Algoritmen gick ${pct(-d, 1, false)} sämre per år i testet${ras ? ", och med större ras" : ""}. Den slår inte börsen.`;
   };
@@ -1128,6 +1128,7 @@
           ${T.bättre_3år != null ? kv("Bättre än index över 3 år", `${pct(T.bättre_3år, 0, false)} av alla 3-årsperioder`) : ""}
           ${T.byten != null ? kv("Byten per beslut", `cirka ${num(T.byten, 0)} av ${R.antal} aktier`) : ""}
           ${va.length ? kv("Med beslut andra månader", va.map((v) => pct(v.cagr)).join(" och ") + " per år", "Samma regler, men besluten tas i februari/maj/augusti/november eller mars/juni/september/december. Visar hur mycket resultatet beror på tillfälligheter.") : ""}
+          <p class="tiny muted" style="margin-top:8px">Siffrorna kan ändras lite från dag till dag, eftersom modellen tränas om varje kväll. Det visar att skillnaden mot index ligger inom felmarginalen.</p>
         </div>
         <div class="card"><h2>År för år</h2>
           <table class="ktab"><thead><tr><th>År</th><th>Algoritmen</th><th>S&P 500</th><th>Skillnad</th></tr></thead><tbody>
