@@ -1,29 +1,35 @@
 #!/usr/bin/env python3
 """
-Algoritmen: en datormodell som lär sig av historiska kurser vilka aktier som brukar gå bäst
-den närmaste månaden, och som fattar beslut (köp / behåll / sälj) utifrån det.
+Algoritmen: en datormodell som lär sig av historiska kurser vilka aktier som brukar gå bättre
+än andra de närmaste 3–6 månaderna, och som fattar beslut (köp / behåll / sälj) utifrån det.
 
 Så fungerar den
-  1. Data      Dagliga kurser och omsättning för alla aktier som varit med i S&P 500 sedan 2005
-               (Yahoo Finance). Vilka bolag som var med vid varje tidpunkt kommer från en öppen
-               lista (github.com/fja05680/sp500), så att modellen inte får "veta" i förväg vilka
-               bolag som senare blev stora.
-  2. Faktorer  19 mått per aktie och månad: trend, senaste veckorna, svängningar, handel,
-               reaktion på senaste rapporten, säsong och bransch. Varje mått görs om till en
-               rangordning mellan aktierna den dagen.
-  3. Modell    En vägd poäng (ridge-regression) och beslutsträd (gradient boosting) tränas att
-               förutse vilka aktier som går bättre än de andra den kommande månaden.
-  4. Test      Modellen tränas bara på data FÖRE varje testår och prövas sedan på året efter
+  1. Data      Dagliga kurser och handel för aktier som varit med i S&P 500 sedan 2005 (Yahoo Finance).
+               Vilka bolag som var med vid varje tidpunkt kommer från en öppen lista
+               (github.com/fja05680/sp500), så att modellen inte får "veta" i förväg vilka bolag
+               som senare blev stora.
+  2. Faktorer  18 mått per aktie och månad: trend, senaste veckorna, svängningar, handel, reaktion på
+               senaste rapporten, säsong och bransch. Varje mått görs om till en rangordning mellan
+               aktierna den dagen.
+  3. Mål       Modellen ska förutse vilka aktier som går bättre än andra aktier i samma bransch och
+               med samma risk. Det som bara beror på att hela börsen eller branschen gick upp eller
+               ner räknas bort – annars lär den sig bara att välja aktier som svänger mycket.
+  4. Modell    Sex modeller med beslutsträd (gradient boosting): tre inställningar × två tidshorisonter
+               (3 och 6 månader). Poängen är snittet av dem, så att resultatet inte hänger på en enda
+               lyckad inställning.
+  5. Test      Modellen tränas bara på data FÖRE varje testår och prövas sedan på året efter
                (walk-forward), med 0,3 % avgift per affär. Resultatet visas i appen.
-  5. Beslut    Varje månad väljs de 20 högst rankade aktierna (högst 5 per bransch). En aktie
-               säljs först när den fallit ur de 60 bästa. Beslutet tas på månadens första
-               handelsdag och genomförs till stängningskursen dagen efter.
+  6. Beslut    En gång per kvartal väljs de 20 högst rankade aktierna (högst 5 per bransch). En aktie
+               säljs först när den fallit ur den bästa femtedelen (cirka 100 aktier). Beslutet tas första handelsdagen i kvartalet
+               och genomförs till stängningskursen dagen efter.
 
 Ingen AI används – körningen är gratis. Skriver docs/data/algoritm.json.
 
   python algoritm.py            # riktig data
   python algoritm.py --demo     # påhittad data, inget internet
 
+Viktigt: testet är snällare än verkligheten. Bolag som köpts upp eller gått i konkurs saknas hos
+Yahoo (ungefär en tredjedel av de äldre bolagen), och flera varianter har prövats innan den här valdes.
 Inte finansiell rådgivning. Historiska resultat är ingen garanti för framtiden.
 """
 from __future__ import annotations
@@ -45,7 +51,6 @@ import pandas as pd
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(ROOT, "docs", "data", "algoritm.json")
-KRASCH = os.path.join(ROOT, "docs", "data", "krasch.json")
 NU_URL = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv"
 HIST_URL = "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20(Updated).csv"
 MIN_KVOT = 0.03        # skydd mot fel bolag under samma kortnamn: ett indexbolag handlas aldrig för mindre än 3 % av medianbolaget
@@ -62,15 +67,14 @@ ALIAS = {
 START = "2004-01-01"   # kursdata hämtas härifrån
 TEST_FRAN = 2010       # första testår (åren före används bara för träning)
 N_INNEHAV = 20         # antal aktier i algoritmens portfölj
-BUFFERT = 60           # en aktie behålls så länge den är bland de 60 bästa
+BUFFERT = 0.20         # en aktie behålls så länge den är bland den bästa femtedelen (cirka 100 av 500)
 MAX_SEKTOR = 5         # högst så många aktier per bransch
 KOSTNAD = 0.003        # avgift per köp eller sälj (courtage + valutaväxling)
-KOP_P, SALJ_P = 90, 20  # poäng (0–100) för Köp respektive Sälj
-VAL = "ens"            # modell som används: "ridge", "gbm" eller "ens" (snittet av båda)
+KOP_P, SALJ_P = 90, 10  # poäng (0–100): Köp från 90, Sälj under 10
+BESLUT_MANADER = (1, 4, 7, 10)   # beslut tas första handelsdagen i januari, april, juli och oktober
 HORISONTER = (1, 3, 6)  # månader framåt som sparas i träningsdatan
-HORISONT = 1           # så många månader framåt modellen tränas att förutse
-JUSTERA = False        # räkna bort börsens rörelse ur målet (se satt_mal)
-RIDGE_L = 0.02
+MAL = (3, 6)           # modellerna tränas att förutse 3 respektive 6 månader framåt
+GBM = [dict(max_depth=3, max_iter=150), dict(max_depth=2, max_iter=200), dict(max_depth=4, max_iter=100)]   # tre inställningar
 MIN_OMS, MIN_KURS = 5e6, 2.0   # övriga aktier: minst så stor daglig handel ($) och kurs
 
 # Faktorerna och vilket tema de hör till
@@ -416,6 +420,27 @@ def signaldagar(D: Data) -> list[int]:
     return [i for i in range(258, len(D.dates) - 1) if m[i] != m[i - 1]]
 
 
+def _r(x):
+    """Rang 0..1 inom en vektor."""
+    r = np.empty(len(x))
+    r[np.argsort(x, kind="stable")] = (np.arange(len(x)) + 0.5) / max(len(x), 1)
+    return r
+
+
+def rensat_mal(f: np.ndarray, beta: np.ndarray, sek: np.ndarray) -> np.ndarray:
+    """
+    Det modellen ska lära sig förutse: aktiens rangordning efter avkastning, sedan det som beror på
+    börsens och branschens rörelse räknats bort (en regression per månad på aktiens beta och bransch).
+    Då letar modellen efter aktier som går bättre än sina likar – inte bara efter aktier som svänger mer.
+    """
+    ok = np.isfinite(f)
+    if ok.sum() < 30:
+        return np.full(len(f), np.nan)
+    Z = np.column_stack([np.ones(len(f)), _r(beta) - 0.5] + [(sek == g).astype(float) for g in np.unique(sek)[1:]])
+    coef, *_ = np.linalg.lstsq(Z[ok], f[ok], rcond=None)
+    return rang(f - Z @ coef, ok)
+
+
 def bygg(D: Data, medl: dict, hist: list):
     """Träningsdata: en rad per aktie och månad med faktorer och hur aktien gick 1, 3 och 6 månader efteråt."""
     sig = signaldagar(D)
@@ -428,95 +453,70 @@ def bygg(D: Data, medl: dict, hist: list):
         X, mask, _, f = tvarsnitt(D, i, mm, sek_ix)
         e0 = i + 1                                   # köp sker till stängningskursen dagen efter beslutet
         ok = mask & np.isfinite(D.Pf[e0])
-        fh = {}
+        beta = np.clip(np.nan_to_num(f["beta"][ok], nan=1.0), 0.0, 3.0)
+        fh, y = {}, {}
         for h in HORISONTER:
             if k + h < len(sig):
                 e1 = sig[k + h] + 1
                 fh[h] = (np.clip(D.Pf[e1][ok] / D.Pf[e0][ok] - 1, -0.95, 1.5 if h == 1 else 3.0), float(D.m[e1] / D.m[e0] - 1))
+                if h in MAL:
+                    y[h] = rensat_mal(fh[h][0], beta, sek_ix[ok])
         fwd, bm = fh.get(1, (np.full(int(ok.sum()), np.nan), np.nan))
-        rader.append({"i": i, "datum": D.dates[i], "ix": np.flatnonzero(ok), "X": X[ok], "fwd": fwd, "spy": bm, "fh": fh,
-                      "beta": np.clip(np.nan_to_num(f["beta"][ok], nan=1.0), 0.0, 3.0), "klar": 1 in fh, "medl": mk[D.dates[i]][1]})
-    satt_mal(rader)
+        rader.append({"i": i, "datum": D.dates[i], "ix": np.flatnonzero(ok), "X": X[ok], "fwd": fwd, "spy": bm, "fh": fh, "y": y,
+                      "klar": 1 in fh, "medl": mk[D.dates[i]][1]})
     return rader, sek_ix, sek_namn, mk
 
 
-def satt_mal(rader, h: int | None = None, justera: bool | None = None):
-    """
-    Det modellen ska lära sig förutse: aktiens rangordning efter avkastningen de kommande h månaderna.
-    justera=True räknar först bort det som bara beror på att hela börsen gick upp eller ner (beta × börsen),
-    så att modellen letar efter aktier som går bättre än sin risk motiverar – inte bara efter aktier som svänger mer.
-    """
-    h = HORISONT if h is None else h
-    justera = JUSTERA if justera is None else justera
-    for r in rader:
-        if h in r["fh"]:
-            f, bm = r["fh"][h]
-            z = f - r["beta"] * bm if justera else f
-            r["y"], r["tr"] = rang(z, np.isfinite(z)), True
-        else:
-            r["y"], r["tr"] = np.full(len(r["ix"]), np.nan), False
-    return rader
-
-
 # ---------------------------------------------------------------------------
-# 3. Modeller
+# 3. Modell
 # ---------------------------------------------------------------------------
-def ridge_fit(X, y):
-    n, p = X.shape
-    return np.linalg.solve(X.T @ X + RIDGE_L * n * np.eye(p), X.T @ y)
-
-
-def gbm_fit(X, y):
-    from sklearn.ensemble import HistGradientBoostingRegressor
-    return HistGradientBoostingRegressor(max_depth=3, max_iter=150, learning_rate=0.05, min_samples_leaf=200,
-                                         l2_regularization=1.0, early_stopping=False, random_state=0).fit(X, y)
-
-
-def _r(x):
-    """Rang 0..1 inom en vektor."""
-    r = np.empty(len(x))
-    r[np.argsort(x, kind="stable")] = (np.arange(len(x)) + 0.5) / max(len(x), 1)
-    return r
-
-
 class Modell:
-    def __init__(self, rader, gbm=True):
-        tr = [r for r in rader if r["tr"]]
-        X = np.vstack([r["X"] for r in tr])
-        y = np.concatenate([r["y"] for r in tr])
-        ok = np.isfinite(y)
-        self.n = int(ok.sum())
-        self.w = ridge_fit(X[ok], y[ok])
-        self.g = gbm_fit(X[ok], y[ok]) if gbm else None
+    """Snittet av flera beslutsträdsmodeller (gradient boosting), tränade på 3 och 6 månaders sikt."""
 
-    def poang(self, X, bas: np.ndarray | None = None) -> dict:
-        """Poäng per modell. bas = vilka rader som utgör jämförelsegruppen (indexets aktier)."""
-        a = X @ self.w
-        out = {"ridge": a}
-        if self.g is not None:
-            b = self.g.predict(X)
-            out["gbm"] = b
-            if bas is None:
-                out["ens"] = (_r(a) + _r(b)) / 2
-            else:   # övriga aktier placeras in i indexaktiernas rangordning
-                sa, sb = np.sort(a[bas]), np.sort(b[bas])
-                out["ens"] = (np.searchsorted(sa, a) / len(sa) + np.searchsorted(sb, b) / len(sb)) / 2
-        return out
+    def __init__(self, rader, slut: int | None = None):
+        """Tränar på rader före index slut. De sista månaderna utelämnas eftersom deras utfall inte var känt då."""
+        from sklearn.ensemble import HistGradientBoostingRegressor
+        slut = len(rader) if slut is None else slut
+        self.gs, self.n = [], 0
+        for h in MAL:
+            tr = [r for r in rader[:max(slut - h, 0)] if h in r["y"]]
+            if not tr:
+                continue
+            X = np.vstack([r["X"] for r in tr])
+            y = np.concatenate([r["y"][h] for r in tr])
+            ok = np.isfinite(y)
+            self.n = max(self.n, int(ok.sum()))
+            for kw in GBM:
+                self.gs.append(HistGradientBoostingRegressor(learning_rate=0.05, min_samples_leaf=200, l2_regularization=1.0,
+                                                             early_stopping=False, random_state=0, **kw).fit(X[ok], y[ok]))
+        self.mu = self.sd = None
+
+    def poang(self, X, bas: np.ndarray | None = None, fast: bool = False) -> np.ndarray:
+        """
+        Poäng per aktie: varje modells förutsägelse räknas om till avstånd från snittet i jämförelsegruppen
+        (bas = indexets aktier), sedan tas snittet av modellerna. fast=True återanvänder förra jämförelsen.
+        """
+        P = np.column_stack([g.predict(X) for g in self.gs])
+        if not fast:
+            B = P if bas is None else P[bas]
+            self.mu, self.sd = B.mean(0), B.std(0) + 1e-12
+        return ((P - self.mu) / self.sd).mean(1)
 
 
-def walk_forward(rader, gbm=True):
-    """Tränar på allt före varje testår och förutser året. Returnerar förutsägelser per månad."""
-    ar = sorted({r["datum"].year for r in rader if r["klar"]})
+def walk_forward(rader):
+    """Tränar på allt före varje testår och förutser året. Returnerar poäng per månad."""
     pred = {}
-    for y in [a for a in ar if a >= TEST_FRAN]:
-        tr = [r for r in rader if r["datum"].year < y]
-        tr = tr[:-HORISONT]   # de sista månaderna före teståret slutar inne i testperioden – tas bort
-        if len(tr) < 36:
+    for y in sorted({r["datum"].year for r in rader}):
+        if y < TEST_FRAN:
             continue
-        m = Modell(tr, gbm)
-        for k, r in enumerate(rader):
-            if r["datum"].year == y:
-                pred[k] = m.poang(r["X"])
+        k0 = next(k for k, r in enumerate(rader) if r["datum"].year == y)
+        if k0 - max(MAL) < 36:
+            continue
+        m = Modell(rader, k0)
+        for k in range(k0, len(rader)):
+            if rader[k]["datum"].year != y:
+                break
+            pred[k] = m.poang(rader[k]["X"])
     return pred
 
 
@@ -544,6 +544,11 @@ def valj(ordning, behall, sek, n=N_INNEHAV, max_sek=MAX_SEKTOR):
     return val
 
 
+def buffert(antal: int) -> int:
+    """Så högt i rangordningen måste en aktie ligga för att behållas."""
+    return max(N_INNEHAV, int(round(BUFFERT * antal)))
+
+
 def spearman(a, b):
     ok = np.isfinite(a) & np.isfinite(b)
     if ok.sum() < 20:
@@ -556,73 +561,90 @@ def nyckeltal(ret: np.ndarray) -> dict:
     v = np.cumprod(1 + ret)
     ar = len(ret) / 12
     return {"cagr": float(v[-1] ** (1 / ar) - 1), "vol": float(ret.std() * np.sqrt(12)),
-            "maxdd": float((v / np.maximum.accumulate(v) - 1).min()),
-            "sharpe": float(ret.mean() / ret.std() * np.sqrt(12)) if ret.std() > 0 else None}
+            "maxdd": float(min((v / np.maximum.accumulate(np.concatenate([[1.0], v]))[1:] - 1).min(), 0.0))}
 
 
-def testa(rader, pred, sek_ix, krasch: pd.Series | None, modell=VAL):
-    """Hur hade algoritmen gått? Tiondelar, träffsäkerhet och portföljen mot jämförelser, efter avgifter."""
-    ks = [k for k in sorted(pred) if rader[k]["klar"] and modell in pred[k]]
-    ic, dec, dec_abs = [], [], []
-    port, jamf, spy, oms, datum, broms = [], [], [], [], [], []
-    innehav, w_prev = [], {}
-    andel_prev = 1.0
-    for k in ks:
-        r, s = rader[k], pred[k][modell]
-        fwd = r["fwd"]
-        ok = np.isfinite(fwd)
-        ic.append(spearman(s, fwd))
-        q = np.minimum((_r(s) * 10).astype(int), 9)
-        snitt = np.nanmean(fwd[ok])
-        dec.append([np.nanmean(fwd[ok & (q == d)]) - snitt for d in range(10)])
-        dec_abs.append([np.nanmean(fwd[ok & (q == d)]) for d in range(10)])
-        # Portföljen
-        ordn = r["ix"][np.argsort(-s, kind="stable")]
-        rank = {int(t): n for n, t in enumerate(ordn)}
-        beh = [t for t in innehav if t in rank and rank[t] < BUFFERT]
-        innehav = valj([int(t) for t in ordn], beh, {int(t): int(sek_ix[t]) for t in r["ix"]})
-        w = {t: 1 / len(innehav) for t in innehav}
-        handel = sum(abs(w.get(t, 0) - w_prev.get(t, 0)) for t in set(w) | set(w_prev))
-        avk = {int(t): f for t, f in zip(r["ix"], fwd)}
-        pr = sum(w[t] * (avk[t] if np.isfinite(avk[t]) else 0.0) for t in innehav) - KOSTNAD * handel
-        port.append(pr)
-        jamf.append(snitt)
-        spy.append(r["spy"])
+def simulera(rader, pred, ks, sek_ix, manader=BESLUT_MANADER):
+    """
+    Algoritmens portfölj månad för månad. Beslut tas bara de månader som anges (och den första månaden).
+    Vid ett beslut säljs aktier som fallit ur den bästa femtedelen, och pengarna delas lika på de nya köpen.
+    Det som behålls rörs inte. En aktie som lämnat indexet säljs direkt. Avgiften dras på allt som köps och säljs.
+    """
+    port, oms, byten, w = [], [], [], {}
+    for m, k in enumerate(ks):
+        r = rader[k]
+        fwd = np.nan_to_num(r["fwd"], nan=0.0)
+        ix = [int(t) for t in r["ix"]]
+        avk = dict(zip(ix, fwd))
+        har = [t for t in w if t in avk]
+        if m == 0 or r["datum"].month in manader:
+            ordn = [ix[j] for j in np.argsort(-pred[k], kind="stable")]
+            rank = {t: n for n, t in enumerate(ordn)}
+            val = valj(ordn, [t for t in har if rank[t] < buffert(len(ordn))], {t: int(sek_ix[t]) for t in ix})
+            byten.append(sum(t not in w for t in val) if w else 0)
+        else:
+            val = har
+        kvar = {t: w[t] for t in val if t in w}
+        nya = [t for t in val if t not in w]
+        if not w:
+            nw = {t: 1 / len(val) for t in val}
+        elif nya:
+            fri = 1 - sum(kvar.values())
+            nw = {**kvar, **{t: fri / len(nya) for t in nya}}
+        else:
+            tot = sum(kvar.values())
+            nw = {t: v / tot for t, v in kvar.items()}
+        handel = sum(abs(nw.get(t, 0) - w.get(t, 0)) for t in set(nw) | set(w))
+        port.append(sum(nw[t] * avk[t] for t in nw) - KOSTNAD * handel)
         oms.append(handel / 2)
-        datum.append(r["datum"])
-        # vikterna driver med kursen till nästa månad
-        tot = sum(w[t] * (1 + (avk[t] if np.isfinite(avk[t]) else 0.0)) for t in innehav)
-        w_prev = {t: w[t] * (1 + (avk[t] if np.isfinite(avk[t]) else 0.0)) / tot for t in innehav}
-        # Variant: halva portföljen i kontanter när krasch-mätaren visar rött
-        if krasch is not None:
-            fore = krasch[krasch.index < r["datum"]]
-            andel = 0.5 if len(fore) and fore.iloc[-1] >= 65 else 1.0
-            broms.append(andel * pr - KOSTNAD * abs(andel - andel_prev))
-            andel_prev = andel
+        tot = sum(nw[t] * (1 + avk[t]) for t in nw)
+        w = {t: nw[t] * (1 + avk[t]) / tot for t in nw}
+    return np.array(port), np.array(oms), byten
+
+
+def testa(rader, pred, sek_ix):
+    """Hur hade algoritmen gått? Träffsäkerhet, tiondelar och portföljen mot index, efter avgifter."""
+    ks = [k for k in sorted(pred) if rader[k]["klar"]]
     if len(ks) < 24:
         return None
+    # Träffsäkerhet mäts på 3 månaders sikt (det modellen tränas för). Var tredje månad används, så att perioderna inte överlappar.
+    ic, dec = [], []
+    for k in ks[::3]:
+        if 3 not in rader[k]["fh"]:
+            continue
+        s, fwd = pred[k], rader[k]["fh"][3][0]
+        ic.append(spearman(s, fwd))
+        q = np.minimum((_r(s) * 10).astype(int), 9)
+        dec.append([np.nanmean(fwd[q == d]) - np.nanmean(fwd) for d in range(10)])
     ic = np.array(ic)
-    port, jamf, spy = np.array(port), np.array(jamf), np.array(spy)
-    ar = sorted({d.year for d in datum})
+    port, oms, byten = simulera(rader, pred, ks, sek_ix)
+    jamf = np.array([np.nanmean(rader[k]["fwd"]) for k in ks])
+    spy = np.array([rader[k]["spy"] for k in ks])
+    datum = [rader[k]["datum"] for k in ks]
     per_ar = []
-    for y in ar:
+    for y in sorted({d.year for d in datum}):
         m = np.array([d.year == y for d in datum])
-        per_ar.append({"år": y, "algoritm": float(np.prod(1 + port[m]) - 1), "snitt": float(np.prod(1 + jamf[m]) - 1), "index": float(np.prod(1 + spy[m]) - 1), "månader": int(m.sum())})
-    ut = {
+        per_ar.append({"år": y, "algoritm": float(np.prod(1 + port[m]) - 1), "snitt": float(np.prod(1 + jamf[m]) - 1),
+                       "index": float(np.prod(1 + spy[m]) - 1), "månader": int(m.sum())})
+    # Samma regler men med besluten andra månader (feb/maj/aug/nov och mar/jun/sep/dec): visar hur mycket som är tur
+    varianter = []
+    for fas in (1, 2):
+        man = tuple((x - 1 + fas) % 12 + 1 for x in BESLUT_MANADER)
+        p2, _, _ = simulera(rader, pred, ks[fas:], sek_ix, man)
+        varianter.append({"månader": list(man), **nyckeltal(p2), "index": nyckeltal(spy[fas:])["cagr"]})
+    tre = [float(np.prod(1 + port[i:i + 36]) > np.prod(1 + spy[i:i + 36])) for i in range(len(port) - 35)]
+    return {
         "från": datum[0].strftime("%Y-%m-%d"), "till": (datum[-1] + pd.offsets.MonthBegin(1)).strftime("%Y-%m-%d"), "månader": len(ks),
         "ic": float(np.nanmean(ic)), "ic_t": float(np.nanmean(ic) / np.nanstd(ic) * np.sqrt(np.isfinite(ic).sum())), "ic_plus": float(np.nanmean(ic > 0)),
-        "tiondelar": [float(x) * 12 for x in np.nanmean(np.array(dec), 0)],
-        "tiondelar_abs": [float(x) * 12 for x in np.nanmean(np.array(dec_abs), 0)],
+        "tiondelar": [float(x) * 4 for x in np.nanmean(np.array(dec), 0)],
         "algoritm": nyckeltal(port), "snitt": nyckeltal(jamf), "index": nyckeltal(spy),
-        "omsättning": float(np.mean(oms) * 12), "bättre_än_snitt": float(np.mean(port > jamf)), "bättre_än_index": float(np.mean(port > spy)),
-        "år": per_ar, "år_bättre": int(sum(a["algoritm"] > a["index"] for a in per_ar)),
-        "kurva": {"datum": [d.strftime("%Y-%m-%d") for d in datum] , "algoritm": [round(float(x), 4) for x in np.cumprod(1 + port)],
+        "omsättning": float(np.mean(oms) * 12), "byten": float(np.mean(byten[1:])) if len(byten) > 1 else None,
+        "bättre_månader": float(np.mean(port > spy)), "bättre_3år": float(np.mean(tre)) if tre else None,
+        "år": per_ar, "år_bättre": int(sum(a["algoritm"] > a["index"] for a in per_ar)), "varianter": varianter,
+        "kurva": {"datum": [d.strftime("%Y-%m-%d") for d in datum], "algoritm": [round(float(x), 4) for x in np.cumprod(1 + port)],
                   "snitt": [round(float(x), 4) for x in np.cumprod(1 + jamf)], "index": [round(float(x), 4) for x in np.cumprod(1 + spy)]},
         "kostnad": KOSTNAD,
     }
-    if broms:
-        ut["broms"] = nyckeltal(np.array(broms))
-    return ut
 
 
 # ---------------------------------------------------------------------------
@@ -630,11 +652,11 @@ def testa(rader, pred, sek_ix, krasch: pd.Series | None, modell=VAL):
 # ---------------------------------------------------------------------------
 def uppdatera_portfolj(st: dict | None, datum: str, avk, index_avk, ordning: list[str], sek: dict) -> dict:
     """
-    st       förra lägets portfölj (eller None)
-    datum    dagens datum (senaste stängningskurs)
-    avk      funktion (ticker, från_datum) -> avkastning från det datumet till idag
+    st         förra lägets portfölj (eller None)
+    datum      dagens datum (senaste stängningskurs)
+    avk        funktion (ticker, från_datum) -> avkastning från det datumet till idag
     index_avk  funktion (från_datum) -> S&P 500 (SPY) under samma tid
-    ordning  indexets aktier, bäst först
+    ordning    indexets aktier, bäst först
     """
     st = json.loads(json.dumps(st)) if st else {"start": None, "senast": None, "värde": 100.0, "index": 100.0, "innehav": [], "beslut": None, "logg": [],
                                                  "historik": {"datum": [], "algoritm": [], "index": []}}
@@ -649,31 +671,29 @@ def uppdatera_portfolj(st: dict | None, datum: str, avk, index_avk, ordning: lis
             st["index"] *= 1 + index_avk(st["senast"])
             if st["innehav"]:
                 st["värde"] = sum(h["v"] for h in st["innehav"])
-    # 2. Genomför gårdagens beslut till dagens stängningskurs
+    # 2. Genomför det väntande beslutet till dagens stängningskurs (dagen efter att det togs)
     b = st["beslut"]
     if b and not b["klart"] and b["datum"] < datum:
         kvar = [h for h in st["innehav"] if h["t"] not in b["sälj"]]
         salda = [h for h in st["innehav"] if h["t"] in b["sälj"]]
-        nav = st["värde"] if st["start"] else 100.0
         nya = [t for t in b["köp"] if t not in {h["t"] for h in kvar}]
-        n = len(kvar) + len(nya)
-        if n:
-            mal = nav / n
-            handel = sum(h["v"] for h in salda) + sum(abs(mal - h["v"]) for h in kvar) + mal * len(nya)
-            nav -= KOSTNAD * handel
-            mal = nav / n
+        fri = sum(h["v"] for h in salda) * (1 - KOSTNAD) if st["start"] else 100.0   # pengar att köpa för, efter säljavgift
+        fri *= 1 - KOSTNAD                                                           # köpavgift
+        if nya:
+            kvar += [{"t": t, "v": fri / len(nya), "f": 1.0, "köpt": datum} for t in nya]
+        elif kvar and fri > 0:      # inget nytt att köpa: pengarna delas på det som finns kvar
             for h in kvar:
-                h["v"] = mal
-            kvar += [{"t": t, "v": mal, "f": 1.0, "köpt": datum} for t in nya]
-        st["innehav"], st["värde"] = kvar, nav
+                h["v"] += fri / len(kvar)
+        st["innehav"] = kvar
+        st["värde"] = sum(h["v"] for h in kvar) if kvar else st["värde"]
         b["klart"], b["genomfört"] = True, datum
         if not st["start"]:
             st["start"], st["index"] = datum, 100.0
         st["logg"] = ([{"datum": datum, "köp": nya, "sälj": [h["t"] for h in salda]}] + st["logg"])[:24]
-    # 3. Nytt beslut första körningen i en ny månad
-    if b is None or (b["klart"] and b["datum"][:7] != datum[:7]):
+    # 3. Nytt beslut: första gången, och sedan första körningen i varje beslutsmånad
+    if b is None or (b["klart"] and int(datum[5:7]) in BESLUT_MANADER and b["datum"][:7] != datum[:7]):
         har = [h["t"] for h in st["innehav"]]
-        behall = [t for t in har if t in rank and rank[t] < BUFFERT]
+        behall = [t for t in har if t in rank and rank[t] < buffert(len(ordning))]
         val = valj(ordning, behall, sek)
         st["beslut"] = {"datum": datum, "köp": [t for t in val if t not in har], "sälj": [t for t in har if t not in behall],
                         "behåll": behall, "klart": False, "genomfört": None}
@@ -690,6 +710,39 @@ def uppdatera_portfolj(st: dict | None, datum: str, avk, index_avk, ordning: lis
 # ---------------------------------------------------------------------------
 # 6. Kör allt
 # ---------------------------------------------------------------------------
+def dagens_poang(D: Data, C, P, V, spy, medl: dict, sek_ix, modell: Modell, ovriga=None):
+    """
+    Poäng för alla aktier idag. Indexets aktier rangordnas sinsemellan. Övriga aktier (ovriga = justerad kurs,
+    ojusterad kurs och handel för de senaste 2 åren) placeras in i indexaktiernas rangordning, faktor för faktor.
+    Returnerar kortnamn, vilka som fick poäng, vilka av dem som är indexaktier, faktorer, poäng och poäng 0–100.
+    """
+    i = len(D.dates) - 1
+    if ovriga is not None and ovriga[0].shape[1]:
+        Ce, Pe, Ve = ovriga
+        sista = D.dates[-520:]
+        D2 = Data(pd.concat([C.reindex(sista), Ce.reindex(sista)], axis=1), pd.concat([P.reindex(sista), Pe.reindex(sista)], axis=1),
+                  pd.concat([V.reindex(sista), Ve.reindex(sista)], axis=1), spy.reindex(D.dates).iloc[-520:])
+        # Säsong kräver lång historik: ta den från hela datamängden för indexets aktier (övriga får ingen säsong)
+        sas = np.concatenate([D.sasong(i), np.full(Ce.shape[1], np.nan)])
+        D2.sasong = lambda _i, _s=sas: _s
+        sek2 = np.concatenate([sek_ix, np.full(Ce.shape[1], -1)])
+        mm = np.array([t in medl for t in D2.tick])
+        X, mask, mask_alla, _ = tvarsnitt(D2, len(D2.dates) - 1, mm, sek2, extra_mask=~mm)
+        tick = D2.tick
+    else:
+        mm = np.array([t in medl for t in D.tick])
+        X, mask, mask_alla, _ = tvarsnitt(D, i, mm, sek_ix)
+        tick = D.tick
+    ix = np.flatnonzero(mask_alla)
+    karna = mask[ix]
+    Xi = X[ix]
+    po = modell.poang(Xi, bas=karna)
+    # Poäng 0–100: andel av indexets aktier som har lägre poäng
+    bas = np.sort(po[karna])
+    p100 = np.clip((np.searchsorted(bas, po, side="left") + np.searchsorted(bas, po, side="right")) / 2 / len(bas) * 100, 0, 100)
+    return tick, ix, karna, Xi, po, p100
+
+
 def spara_data(fil, C, P, V, spy, medl, hist):
     f32 = lambda d: d.reindex(index=C.index, columns=C.columns).to_numpy(np.float32)
     np.savez_compressed(fil, C=f32(C), P=f32(P), V=f32(V), spy=spy.reindex(C.index).to_numpy(float),
@@ -703,16 +756,6 @@ def las_data(fil):
     df = lambda k: pd.DataFrame(z[k].astype(float), index=idx, columns=list(z["tick"]))
     spy = pd.Series(z["spy"], index=idx).dropna()
     return df("C"), df("P"), df("V"), spy, json.loads(str(z["medl"])), [(pd.Timestamp(d), frozenset(ts)) for d, ts in json.loads(str(z["hist"]))]
-
-
-def las_krasch() -> pd.Series | None:
-    try:
-        with open(KRASCH, encoding="utf-8") as fh:
-            h = json.load(fh)["historik"]
-        s = pd.Series(h["poäng"], index=pd.to_datetime(h["datum"]), dtype=float).dropna()
-        return s if len(s) > 100 else None
-    except Exception:  # noqa: BLE001
-        return None
 
 
 def main():
@@ -737,10 +780,10 @@ def main():
     # --- Data ---
     if args.demo:
         C, P, V, spy, medl, hist = demo_data(effekt=0.02)
-        Ce = None
+        ovriga = None
     elif args.data:
         C, P, V, spy, medl, hist = las_data(args.data)
-        Ce = None
+        ovriga = None
     else:
         medl, hist = sp500_nu(), sp500_historik()
         alla = set(medl) | set(ALIAS.values())
@@ -758,7 +801,7 @@ def main():
         V.pop("SPY")
         saknas = [t for t in medl if t not in C]
         print(f"Kurser för {C.shape[1]} av {len(alla)} aktier ({len(saknas)} av dagens bolag saknas: {saknas[:12]}) · {time.time() - t0:.0f} s", flush=True)
-        Ce = None
+        ovriga = None
         if not args.utan_ovriga:
             try:
                 ovr = None
@@ -772,11 +815,11 @@ def main():
                 senast = Ce.index[-1]
                 liq = (Pe * Ve).iloc[-60:].median()
                 ok = (liq >= MIN_OMS) & (Pe.iloc[-1] >= MIN_KURS) & Ce.iloc[-1].notna() & (Ce.notna().sum() >= 260)
-                Ce, Pe, Ve = Ce.loc[:, ok], Pe.loc[:, ok], Ve.loc[:, ok]
-                print(f"  {Ce.shape[1]} med tillräcklig handel (till {senast.date()}) · {time.time() - t0:.0f} s", flush=True)
+                ovriga = (Ce.loc[:, ok], Pe.loc[:, ok], Ve.loc[:, ok])
+                print(f"  {int(ok.sum())} med tillräcklig handel (till {senast.date()}) · {time.time() - t0:.0f} s", flush=True)
             except Exception as e:  # noqa: BLE001
                 print(f"::warning::Övriga aktier kunde inte hämtas ({e}). Fortsätter med S&P 500.")
-                Ce = None
+                ovriga = None
 
     if args.spara_data:
         spara_data(args.spara_data, C, P, V, spy, medl, hist)
@@ -786,53 +829,32 @@ def main():
     rader, sek_ix, sek_namn, mk = bygg(D, medl, hist)
     print(f"Träningsdata: {sum(len(r['ix']) for r in rader if r['klar'])} rader, {len(rader)} månader från {rader[0]['datum'].date()} · {time.time() - t0:.0f} s", flush=True)
     pred = walk_forward(rader)
-    krasch = las_krasch()
-    tester = {m: testa(rader, pred, sek_ix, krasch, m) for m in ("ridge", "gbm", "ens")}
-    test = tester[VAL]
+    test = testa(rader, pred, sek_ix)
     if test is None:
         print("::error::För lite data för att testa algoritmen. Den gamla filen behålls.")
         return 1
+    print(f"Test klart · {time.time() - t0:.0f} s", flush=True)
     slut = Modell(rader)
 
     # --- Dagens poäng ---
-    i = len(D.dates) - 1
-    idag = D.dates[i]
-    if Ce is not None and Ce.shape[1]:
-        # Lägg till övriga aktier (2 års historik) bredvid indexets
-        sista = D.dates[-520:]
-        Call = pd.concat([C.reindex(sista), Ce.reindex(sista)], axis=1)
-        Pall = pd.concat([P.reindex(sista), Pe.reindex(sista)], axis=1)
-        Vall = pd.concat([V.reindex(sista), Ve.reindex(sista)], axis=1)
-        D2 = Data(Call, Pall, Vall, spy.reindex(D.dates).iloc[-520:])
-        # Säsong kräver lång historik: ta den från hela datamängden för indexets aktier
-        sas = np.concatenate([D.sasong(i), np.full(Ce.shape[1], np.nan)])
-        D2.sasong = lambda _i, _s=sas: _s
-        i2 = len(D2.dates) - 1
-        sek2 = np.concatenate([sek_ix, np.full(Ce.shape[1], -1)])
-        mm = np.array([t in medl for t in D2.tick])
-        X, mask, mask_alla, _ = tvarsnitt(D2, i2, mm, sek2, extra_mask=~mm)
-        tick = D2.tick
-    else:
-        mm = np.array([t in medl for t in D.tick])
-        X, mask, mask_alla, _ = tvarsnitt(D, i, mm, sek_ix)
-        tick = D.tick
-    ix = np.flatnonzero(mask_alla)
-    karna = mask[ix]
-    po = slut.poang(X[ix], bas=karna)[VAL]
-    # Poäng 0–100: andel av indexets aktier som har lägre poäng
-    bas = np.sort(po[karna])
-    p100 = np.clip((np.searchsorted(bas, po, side="left") + np.searchsorted(bas, po, side="right")) / 2 / len(bas) * 100, 0, 100)
-    # Skäl: hur mycket varje tema drar upp eller ner (från den vägda poängen)
-    bidrag = X[ix] * slut.w
+    idag = D.dates[-1]
+    tick, ix, karna, Xi, po, p100 = dagens_poang(D, C, P, V, spy, medl, sek_ix, slut, ovriga)
+
+    # Skäl: hur mycket varje tema drar upp eller ner poängen. Temats faktorer nollställs ("som snittaktien") och skillnaden mäts.
+    def utan(kolumner):
+        X0 = Xi.copy()
+        X0[:, kolumner] = 0.0
+        return po - slut.poang(X0, fast=True)
+
     tema_ix = [[j for j, (_, t) in enumerate(FAKTORER) if t == tid] for tid in TID]
-    tb = np.column_stack([bidrag[:, js].sum(1) for js in tema_ix])
-    skala = np.abs(tb[karna]).max() or 1.0
-    aktier = {}
-    for n, j in enumerate(ix):
-        aktier[tick[j]] = {"p": int(round(p100[n])), "k": int(karna[n]), "s": [int(round(x / skala * 100)) for x in tb[n]]}
+    tb = np.column_stack([utan(js) for js in tema_ix])
+    skala = float(np.abs(tb[karna]).max()) or 1.0
+    aktier = {tick[j]: {"p": int(round(p100[n])), "k": int(karna[n]), "s": [int(round(x / skala * 100)) for x in tb[n]]} for n, j in enumerate(ix)}
     ordn = [tick[ix[n]] for n in np.argsort(-po, kind="stable") if karna[n]]
     vikt_tema = np.abs(tb[karna]).mean(0)
-    vikt_fakt = np.abs(bidrag[karna]).mean(0)
+    fb = np.column_stack([utan([j]) for j in range(len(FID))])[karna]
+    vikt_fakt = np.abs(fb).mean(0)
+    riktning = [float(np.corrcoef(Xi[karna, j], fb[:, j])[0, 1]) if fb[:, j].std() > 0 else 0.0 for j in range(len(FID))]
 
     # --- Algoritmens portfölj ---
     dstr = idag.strftime("%Y-%m-%d")
@@ -851,8 +873,8 @@ def main():
         return float(s.iloc[-1] / a.iloc[-1] - 1) if len(a) else 0.0
 
     pf = uppdatera_portfolj((forra or {}).get("läge"), dstr, avk, index_avk, ordn, {t: medl[t]["s"] for t in ordn})
-    info = lambda t: {"t": t, "n": medl.get(t, {}).get("n", t), "s": medl.get(t, {}).get("s", "–"), "p": aktier.get(t, {}).get("p"),
-                      "rank": ordn.index(t) + 1 if t in ordn else None}
+    plats = {t: n + 1 for n, t in enumerate(ordn)}
+    info = lambda t: {"t": t, "n": medl.get(t, {}).get("n", t), "s": medl.get(t, {}).get("s", "–"), "p": aktier.get(t, {}).get("p"), "rank": plats.get(t)}
     # Det appen visar (med namn, bransch och poäng). Det råa läget sparas separat under "läge".
     pf_ut = {**pf, "innehav": sorted(({**info(h["t"]), "utv": round(h["f"] - 1, 4), "köpt": h["köpt"], "vikt": round(h["v"] / pf["värde"], 4) if pf["värde"] else None}
                                       for h in pf["innehav"]), key=lambda x: x["rank"] or 9999)}
@@ -860,17 +882,21 @@ def main():
         pf_ut["beslut"] = {**pf["beslut"], **{k: [info(t) for t in pf["beslut"][k]] for k in ("köp", "sälj", "behåll")}}
 
     # --- Skriv ---
-    nasta = (idag + pd.offsets.MonthBegin(1))
+    nasta = idag + pd.offsets.MonthBegin(1)
+    while nasta.month not in BESLUT_MANADER:
+        nasta += pd.offsets.MonthBegin(1)
     while nasta.weekday() >= 5:
         nasta += pd.Timedelta(days=1)
-    w_tot = vikt_tema.sum() or 1.0
+    w_tot, f_tot = float(vikt_tema.sum()) or 1.0, float(vikt_fakt.sum()) or 1.0
     ut = {
         "uppdaterad": dstr, "skapad": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"), "demo": bool(args.demo),
-        "regler": {"antal": N_INNEHAV, "buffert": BUFFERT, "max_bransch": MAX_SEKTOR, "kostnad": KOSTNAD, "köp": KOP_P, "sälj": SALJ_P, "modell": VAL},
+        "regler": {"antal": N_INNEHAV, "buffert": buffert(len(ordn)), "max_bransch": MAX_SEKTOR, "kostnad": KOSTNAD, "köp": KOP_P, "sälj": SALJ_P,
+                   "månader": list(BESLUT_MANADER), "sikt": list(MAL), "modeller": len(slut.gs)},
         "universum": {"index": int(karna.sum()), "övriga": int((~karna).sum()), "tränad_på": slut.n, "månader": sum(r["klar"] for r in rader),
-                      "från": rader[0]["datum"].strftime("%Y-%m-%d"), "aktier_i_data": len(D.tick)},
+                      "från": rader[0]["datum"].strftime("%Y-%m-%d"), "aktier_i_data": len(D.tick),
+                      "täckning": [[r["datum"].year, len(r["ix"]), r["medl"]] for r in rader if r["datum"].month == 1]},
         "teman": [{"id": tid, "namn": namn, "text": text, "vikt": round(float(vikt_tema[n] / w_tot), 3),
-                   "faktorer": [{"namn": FNAMN[FID[j]], "riktning": 1 if slut.w[j] > 0 else -1, "vikt": round(float(vikt_fakt[j] / (vikt_fakt.sum() or 1)), 3)} for j in tema_ix[n]]}
+                   "faktorer": [{"namn": FNAMN[FID[j]], "riktning": round(riktning[j], 2), "vikt": round(float(vikt_fakt[j] / f_tot), 3)} for j in tema_ix[n]]}
                   for n, (tid, namn, text) in enumerate(TEMAN)],
         "test": test,
         "portfölj": pf_ut,
@@ -886,17 +912,17 @@ def main():
 
     # --- Sammanfattning (syns i GitHub Actions) ---
     p = lambda x: "–" if x is None else f"{x * 100:+.1f}%"
-    print(f"::notice title=Algoritmen::{dstr} · {karna.sum()} indexaktier + {(~karna).sum()} övriga · tränad på {slut.n} rader · {os.path.getsize(args.out) // 1024} kB · {time.time() - t0:.0f} s")
-    for m, t in tester.items():
-        if t:
-            print(f"::notice title=Test {m}{' (vald)' if m == VAL else ''}::{t['från']}–{t['till']} · IC {t['ic']:.3f} (t {t['ic_t']:.1f}, {t['ic_plus']:.0%} av månaderna) · algoritm {p(t['algoritm']['cagr'])}/år, snittaktie {p(t['snitt']['cagr'])}, index {p(t['index']['cagr'])} · maxras {p(t['algoritm']['maxdd'])} mot {p(t['index']['maxdd'])} · omsättning {t['omsättning']:.1f}x/år · bättre än index {t['år_bättre']} av {len(t['år'])} år"
-                  + (f" · med krasch-broms {p(t['broms']['cagr'])}/år, maxras {p(t['broms']['maxdd'])}" if t.get("broms") else ""))
-    print("::notice title=Tiondelar (per år mot snittet)::" + " | ".join(p(x) for x in test["tiondelar"]))
-    print("::notice title=År::" + " | ".join(f"{a['år']}: {p(a['algoritm'])} / {p(a['snitt'])} / {p(a['index'])}" for a in test["år"]))
-    print("::notice title=Faktorer::" + " | ".join(f"{FID[j]} {slut.w[j]:+.3f}" for j in np.argsort(-np.abs(slut.w))))
-    print("::notice title=Teman::" + " | ".join(f"{t['namn']} {t['vikt']:.0%}" for t in ut["teman"]))
+    t = test
+    print(f"::notice title=Algoritmen::{dstr} · {karna.sum()} indexaktier + {(~karna).sum()} övriga · tränad på {slut.n} rader · {len(slut.gs)} modeller · {os.path.getsize(args.out) // 1024} kB · {time.time() - t0:.0f} s")
+    print(f"::notice title=Test::{t['från']}–{t['till']} · IC {t['ic']:.3f} (t {t['ic_t']:.1f}, {t['ic_plus']:.0%} av kvartalen) · algoritm {p(t['algoritm']['cagr'])}/år, snittaktie {p(t['snitt']['cagr'])}, index {p(t['index']['cagr'])}"
+          f" · maxras {p(t['algoritm']['maxdd'])} mot {p(t['index']['maxdd'])} · omsättning {t['omsättning']:.1f}x/år, {t['byten']:.1f} byten per beslut · bättre än index {t['år_bättre']} av {len(t['år'])} år, {t['bättre_3år']:.0%} av 3-årsperioderna"
+          f" · andra beslutsmånader: " + ", ".join(f"{p(v['cagr'])} (ras {p(v['maxdd'])})" for v in t["varianter"]))
+    print("::notice title=Tiondelar (per år mot snittet)::" + " | ".join(p(x) for x in t["tiondelar"]))
+    print("::notice title=År (algoritm/snitt/index)::" + " | ".join(f"{a['år']}: {p(a['algoritm'])} / {p(a['snitt'])} / {p(a['index'])}" for a in t["år"]))
+    print("::notice title=Teman::" + " | ".join(f"{x['namn']} {x['vikt']:.0%}" for x in ut["teman"]))
+    print("::notice title=Faktorer::" + " | ".join(f"{FID[j]} {vikt_fakt[j] / f_tot:.0%} ({riktning[j]:+.1f})" for j in np.argsort(-vikt_fakt)))
     print("::notice title=Medlemmar per år::" + " | ".join(f"{r['datum'].year}: {r['medl']} ({len(r['ix'])} med data)" for r in rader if r["datum"].month == 1))
-    print("::notice title=Topp 20::" + ", ".join(ordn[:20]))
+    print("::notice title=Topp 20::" + ", ".join(ordn[:20]) + " · botten: " + ", ".join(ordn[-10:]))
     b = pf["beslut"]
     if b:
         print(f"::notice title=Beslut {b['datum']}{'' if b['klart'] else ' (väntar)'}::KÖP {', '.join(b['köp']) or '–'} · SÄLJ {', '.join(b['sälj']) or '–'} · portfölj {pf['värde']:.2f} mot index {pf['index']:.2f}")
