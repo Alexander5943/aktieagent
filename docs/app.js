@@ -97,6 +97,7 @@
     if (page === "sok") return viewSearch();
     if (page === "topp") return viewTop();
     if (page === "marknad") return viewMarket();
+    if (page === "algoritm") return viewAlgo();
     if (page === "installningar") return viewSettings();
     if (page === "portfolj") return viewPortfolio(arg === "ny" && arg2 ? decodeURIComponent(arg2).toUpperCase() : null);
     if (page === "aktie" && arg) return viewStock(decodeURIComponent(arg).toUpperCase());
@@ -178,9 +179,11 @@
     setTop("Bevakning", `<a class="star" href="#/sok">${ICON.search.replace("<svg", '<svg style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2"')} Lägg till</a>`);
     const me = {}; current = me;
     const gone = () => current !== me;
-    const sigs = {}; let quotes = {}, ai = {};
+    const sigs = {}; let quotes = {}, ai = {}, algoD = null, visad = watch;
     const owned = () => new Set((portfolio || []).map((x) => x.t));
+    loadAlgo().then((d) => { algoD = d; if (!gone()) render(visad); }).catch(() => {});
     const render = (list) => {
+      visad = list;
       if (!list.length) {
         view.innerHTML = `<div class="card empty">${ICON.star}<p><b>Din bevakningslista är tom</b></p>
           <p class="small">Sök efter en aktie och tryck på stjärnan för att följa den.</p>
@@ -193,7 +196,7 @@
         const p = q.pris ?? (sig && sig.pris), lv = levelsFromSig(sig), adv = adviceAt(lv, p, own.has(w.t), sig && sig.hype && sig.hype.poäng);
         const d = (v) => num(v, v < 10 ? 2 : 0);
         return `<a class="row" href="#/aktie/${encodeURIComponent(w.t)}">
-          <div class="main"><b>${esc(w.t)}${own.has(w.t) ? ' <small class="owned">äger</small>' : ""}</b><span>${esc(w.namn || "")}</span>
+          <div class="main"><b>${esc(w.t)}${algoBadge(algoD, w.t)}${own.has(w.t) ? ' <small class="owned">äger</small>' : ""}</b><span>${esc(w.namn || "")}</span>
             <span class="lv">${lv ? `Köp under <b class="up">${d(lv.köp)}</b> · sälj över <b style="color:var(--hold)">${d(lv.del)}</b>` : sig === undefined ? "Räknar köp- och säljkurs …" : "För lite data för köp- och säljkurs"}</span></div>
           ${spark(q.spark, (q.spark && q.spark.at(-1) >= q.spark[0]))}
           <div class="side"><b>${p != null ? num(p) : '<span class="skeleton" style="display:inline-block;width:52px;height:14px"></span>'}</b>
@@ -208,7 +211,7 @@
           <li><b>Sälj allt över:</b> där väntas den ge under 4 % per år – ungefär som en räntefond, men med mer risk.</li></ul>
         <p class="small">Mellan köp- och säljkursen är rådet <b>Håll</b> (eller <b>Vänta</b> om du inte äger aktien). Aktier i din portfölj märks med "äger". Tryck på en aktie för hela stegen.</p>
         <p class="tiny muted">Kurserna flyttar sig när bolagets prognoser ändras. Underlag för egna beslut – inte finansiell rådgivning.</p></details>
-      <p class="disclaimer">Kurser uppdateras varje minut. AI-analysen uppdateras automatiskt varje måndag.</p>`;
+      <p class="disclaimer">Kurser uppdateras varje minut. Siffran vid kortnamnet är <a href="#/algoritm">algoritmens</a> poäng, 0–100.</p>`;
     };
     render(watch);
     try {
@@ -635,7 +638,7 @@
     $("#topaction").innerHTML = starBtn();
 
     const metric = (label, val) => `<div><span>${label}</span><b>${val}</b></div>`;
-    const sections = [["sec-chart", "Graf"], ["sec-ai", "AI"], ["sec-avk", "Avkastning"], ["sec-varde", "Värdering"], ["sec-agare", "Ägare"], ["sec-bolag", "Bolaget"], ["sec-risk", "Risk"], ["sec-sasong", "Säsong"], ["sec-makro", "Makro"], ["sec-tal", "Nyckeltal"]];
+    const sections = [["sec-chart", "Graf"], ["sec-algo", "Algoritm"], ["sec-ai", "AI"], ["sec-avk", "Avkastning"], ["sec-varde", "Värdering"], ["sec-agare", "Ägare"], ["sec-bolag", "Bolaget"], ["sec-risk", "Risk"], ["sec-sasong", "Säsong"], ["sec-makro", "Makro"], ["sec-tal", "Nyckeltal"]];
     view.innerHTML = `
       <div class="hero">
         <div class="name">${esc(s.namn)} · ${esc(t)}${s.börs ? " · " + esc(s.börs) : ""}</div>
@@ -650,7 +653,7 @@
         return [adv ? chip("Råd", adv.råd, RÅD_CLS[adv.råd], "sec-varde") : "", v ? chip("Värdering", v.läge.replace("Kraftigt ", "Mycket "), lägeCls(v.läge), "sec-varde") : "",
           s.risk ? chip("Risk", `${s.risk.nivå}/10`, riskCls(s.risk.nivå), "sec-risk") : "",
           b ? chip("Ägarbetyg", b.betyg, { Bra: "buy", Neutral: "neutral", Dålig: "avoid" }[b.betyg], "sec-agare") : "",
-          `<span id="qai"></span>`].join("");
+          `<span id="qalgo"></span>`, `<span id="qai"></span>`].join("");
       })()}</div>
       <nav class="jump" id="jump" aria-label="Hoppa till">${sections.map(([id, l]) => `<button data-sec="${id}">${l}</button>`).join("")}</nav>
       <div class="card" style="padding-top:8px" id="sec-chart">
@@ -658,6 +661,7 @@
         <div class="chart" id="chart"></div>
         <div class="legend"><span><i style="background:var(--warn)"></i>Snitt 50 dagar</span><span><i style="background:var(--muted)"></i>Snitt 200 dagar</span></div>
       </div>
+      <div id="sec-algo"><div id="algowrap"></div></div>
       <div id="sec-ai"><div id="aiwrap">${aiLoading("Hämtar AI-analys…")}</div></div>
       ${hzCard(s)}
       ${valCard(s)}
@@ -689,6 +693,12 @@
         `<a href="${safeUrl(n.länk)}" target="_blank" rel="noopener">${esc(n.titel)}<span>${esc(n.källa || "")}${n.tid ? " · " + esc(ago(n.tid * 1000)) : ""}</span></a>`).join("")}</div>` : ""}
       <p class="disclaimer">Underlag för egen analys – inte finansiell rådgivning. Data: Yahoo Finance.</p>`;
 
+    loadAlgo().then((ad) => {
+      if (gone() || !$("#algowrap")) return;
+      $("#algowrap").innerHTML = algoCard(ad, t, (portfolio || []).some((x) => x.t === t));
+      const a = algoFor(ad, t);
+      if (a && $("#qalgo")) $("#qalgo").outerHTML = `<button class="qchip" data-sec="sec-algo"><span>Algoritm</span><b class="pill ${a.cls}">${a.rad}</b></button>`;
+    }).catch(() => {});
     $("#quick").onclick = (e) => { const b = e.target.closest("button[data-sec]"); const el = b && document.getElementById(b.dataset.sec); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
     $("#jump").onclick = (e) => { const b = e.target.closest("button"); const el = b && document.getElementById(b.dataset.sec); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
 
@@ -1001,6 +1011,192 @@
     }
   }
 
+  // ---------- Algoritmen: modell som rangordnar aktier och sköter en egen portfölj ----------
+  let algoP = null;
+  const loadAlgo = () => (algoP = algoP || fetch("data/algoritm.json?" + Date.now()).then((r) => { if (!r.ok) throw new Error(); return r.json(); }).catch((e) => { algoP = null; throw e; }));
+  // Beslut enligt portföljens regler: Köp = bland de 20 bästa, Behåll = bland den bästa femtedelen, annars Avstå
+  const algoRad = (p, R) => (p >= R.köp ? ["Köp", "buy"] : p >= (R.behåll ?? 80) ? ["Behåll", "hold"] : ["Avstå", "neutral"]);
+  // Ärlig sammanfattning av testet, oavsett åt vilket håll siffrorna pekar
+  function algoOmdome(T, kort) {
+    const d = T.algoritm.cagr - T.index.cagr, ras = T.algoritm.maxdd < T.index.maxdd - 0.02;
+    const tal = `<b>${pct(T.algoritm.cagr)} per år</b> mot <b>${pct(T.index.cagr)}</b> för S&P 500`;
+    const slut = Math.abs(d) < 0.03
+      ? `Skillnaden är liten och kan vara tur${ras ? `, och rasen var större (${pct(T.algoritm.maxdd, 0)} mot ${pct(T.index.maxdd, 0)})` : ""}.`
+      : d > 0 ? `Men testet är snällare än verkligheten${ras ? ` och rasen var större (${pct(T.algoritm.maxdd, 0)} mot ${pct(T.index.maxdd, 0)})` : ""}.`
+      : `Den slog alltså inte index${ras ? `, och rasen var större (${pct(T.algoritm.maxdd, 0)} mot ${pct(T.index.maxdd, 0)})` : ""}.`;
+    return kort ? `I testet gick algoritmens portfölj ${pct(T.algoritm.cagr)} per år mot ${pct(T.index.cagr)} för index. ${Math.abs(d) < 0.03 ? "Skillnaden är liten och kan vara tur." : d > 0 ? "Testet är snällare än verkligheten." : "Den slog alltså inte index."}`
+      : `I testet ${T.från.slice(0, 4)}–${T.till.slice(0, 4)} gick algoritmens portfölj ${tal}, efter avgifter. ${slut}`;
+  }
+  const algoSlutsats = (T) => {
+    const d = T.algoritm.cagr - T.index.cagr, ras = T.algoritm.maxdd < T.index.maxdd - 0.02;
+    if (Math.abs(d) < 0.03) return `<b>Slutsats: ungefär som index.</b> Algoritmen gick ${pct(Math.abs(d), 1, false)} ${d >= 0 ? "bättre" : "sämre"} per år i testet${ras ? ", med större ras" : ""}. Skillnaden är så liten att den kan vara tur. Räkna inte med att den slår börsen.`;
+    return d > 0 ? `<b>Slutsats: bättre än index i testet, men osäkert.</b> Algoritmen gick ${pct(d, 1, false)} bättre per år${ras ? ", med större ras" : ""}. Testet är snällare än verkligheten (se nedan), så räkna inte med samma resultat framöver.`
+      : `<b>Slutsats: sämre än index.</b> Algoritmen gick ${pct(-d, 1, false)} sämre per år i testet${ras ? ", och med större ras" : ""}. Den slår inte börsen.`;
+  };
+  const algoFor = (d, t) => { const a = d && d.aktier && d.aktier[t]; if (!a) return null; const [rad, c] = algoRad(a.p, d.regler); return { ...a, rad, cls: c }; };
+  const algoBadge = (d, t) => { const a = algoFor(d, t); return a ? ` <i class="abadge ${a.cls}" data-tip="Algoritmens poäng (0–100)">${Math.round(a.p)}</i>` : ""; };
+  const manad = (iso) => `${["januari", "februari", "mars", "april", "maj", "juni", "juli", "augusti", "september", "oktober", "november", "december"][+iso.slice(5, 7) - 1]} ${iso.slice(0, 4)}`;
+
+  // Kort på aktiesidan
+  function algoCard(d, t, owned) {
+    const a = algoFor(d, t), R = d.regler, T = d.test;
+    if (!a) return `<div class="card" id="algo"><h2>Algoritmen</h2><p class="small muted">Algoritmen har ingen poäng för den här aktien. Den räknar bara på amerikanska aktier med minst ett års historik och tillräckligt stor handel.</p></div>`;
+    const iPf = (d.portfölj.innehav || []).find((h) => h.t === t);
+    const skal = d.teman.map((x, i) => ({ namn: x.namn, text: x.text, v: a.s[i] })).filter((x) => Math.abs(x.v) >= 3).sort((x, y) => Math.abs(y.v) - Math.abs(x.v)).slice(0, 4);
+    const text = a.rad === "Köp" ? `Bland de ${R.antal} högst rankade. Algoritmen köper sådana aktier vid nästa beslut.`
+      : a.rad === "Behåll" ? "Bland den bästa femtedelen. Algoritmen behåller sådana aktier men köper inte nya."
+      : owned ? "Utanför den bästa femtedelen. Algoritmen hade inte ägt den här aktien – men det betyder inte att den måste falla."
+      : "Utanför den bästa femtedelen. Algoritmen äger inte sådana aktier – men det betyder inte att de måste falla.";
+    return `<div class="card" id="algo"><h2>Algoritmen</h2>
+      <div class="ahead"><span class="pill ${a.cls}">${a.rad}</span><span class="apo"><b>${Math.round(a.p)}</b> av 100</span></div>
+      <div class="ameter" style="--b:${R.behåll}%;--k:${R.köp}%"><i style="left:${R.behåll}%"></i><i style="left:${R.köp}%"></i><b style="left:${Math.min(99, Math.max(1, a.p))}%"></b></div>
+      <div class="tiny muted ascale"><span>lägst</span><span>högre poäng än ${Math.round(a.p)} % av aktierna i S&P 500</span><span>högst</span></div>
+      <p class="small" style="margin:10px 0 6px">${text}</p>
+      ${iPf ? `<p class="small"><span class="pill buy">Ägs av algoritmen</span> sedan ${esc(fmtDag(iPf.köpt))} (${pct(iPf.utv)}).</p>` : ""}
+      ${skal.length ? `<div class="askal">${skal.map((x) => `<div class="askrow" data-tip="${esc(x.text)}"><span>${esc(x.namn)}</span>
+          <span class="abar"><i class="${x.v >= 0 ? "pos" : "neg"}" style="width:${Math.min(50, 4 + Math.abs(x.v) * 1.2)}%"></i></span><span class="${x.v >= 0 ? "up" : "down"}">${x.v >= 0 ? "höjer" : "sänker"}</span></div>`).join("")}</div>` : ""}
+      ${a.k ? "" : `<p class="tiny muted">Aktien ingår inte i S&P 500, som algoritmen är tränad och testad på. Poängen är därför mer osäker.</p>`}
+      <p class="tiny muted">Gäller de närmaste 3–6 månaderna och bygger bara på kursdata. ${algoOmdome(T, true)} <a href="#/algoritm">Se beslut och test</a></p></div>`;
+  }
+
+  async function viewAlgo() {
+    setTop("Algoritm");
+    const charts = [];
+    const me = { destroy: () => charts.forEach((c) => c.remove()) };
+    current = me;
+    view.innerHTML = `<div class="card"><div class="skeleton" style="height:240px"></div></div>`;
+    let d;
+    try { d = await loadAlgo(); }
+    catch { if (current === me) view.innerHTML = `<div class="card empty"><p><b>Algoritmen har inte räknats än</b></p><p class="small">Den räknas om varje vardagskväll efter att börsen stängt.</p></div>`; return; }
+    if (current !== me) return;
+    const R = d.regler, T = d.test, U = d.universum, pf = d.portfölj, b = pf.beslut;
+    const SEG = [["beslut", "Beslut"], ["rank", "Rankning"], ["test", "Test"], ["metod", "Metod"]];
+    let tab = LS.get("algoTab", "beslut");
+    if (!SEG.some(([k]) => k === tab)) tab = "beslut";
+    const css = getComputedStyle(document.documentElement), col = (v) => css.getPropertyValue(v).trim();
+    const kv = (k, v, tip) => `<div class="kv"${tip ? ` data-tip="${esc(tip)}"` : ""}><span>${k}</span><b>${v}</b></div>`;
+    const rad = (x, hoger) => `<a class="row" href="#/aktie/${encodeURIComponent(x.t)}"><div class="main"><b>${esc(x.t)}</b><span>${esc(x.n)} · ${esc(x.s)}</span></div>
+      <div class="side aside">${hoger}</div></a>`;
+    const po = (x, c) => (x.p == null ? "" : `<span class="pill ${c || algoRad(x.p, R)[1]}">${Math.round(x.p)}</span>`);
+    const omdome = algoOmdome(T);
+
+    const vBeslut = () => {
+      const lista = (rubrik, c, xs, tom) => `<h3 class="ah3"><span class="pill ${c}">${rubrik}</span> ${xs.length ? `${xs.length} aktier` : ""}</h3>${xs.length ? `<div class="list">${xs.map((x) => rad(x, po(x, c === "buy" ? "buy" : "neutral"))).join("")}</div>` : `<p class="small muted">${tom}</p>`}`;
+      const hi = pf.historik, igang = pf.start && hi.datum.length;
+      const besl = !b ? "" : `<div class="card"><h2>${b.klart ? "Senaste beslutet" : "Nytt beslut"}</h2>
+          <p class="small muted" style="margin:-4px 0 4px">${esc(fmtDag(b.datum))} · ${b.klart ? `genomfört ${esc(fmtDag(b.genomfört))}` : "köp och sälj görs till stängningskursen nästa handelsdag"}</p>
+          ${lista("Köp", "buy", b.köp, "Inget att köpa.")}
+          ${b.sälj.length || pf.innehav.length ? lista("Sälj", "avoid", b.sälj, "Inget att sälja.") : ""}
+          ${b.behåll.length ? `<h3 class="ah3"><span class="pill hold">Behåll</span> ${b.behåll.length} aktier</h3><p class="small">${b.behåll.map((x) => `<a href="#/aktie/${encodeURIComponent(x.t)}">${esc(x.t)}</a>`).join(" · ")}</p>` : ""}
+          <p class="small" style="margin-top:12px"><b>Nästa beslut:</b> början av ${esc(manad(d.nästa_beslut))}. Däremellan ändras ingenting, även om poängen rör sig.</p></div>`;
+      const port = `<div class="card"><h2>Algoritmens portfölj</h2>
+          ${igang ? `<div class="atiles"><div><span class="tiny muted">Algoritmen</span><b class="${cls(pf.värde - 100)}">${pct(pf.värde / 100 - 1)}</b></div><div><span class="tiny muted">S&P 500</span><b class="${cls(pf.index - 100)}">${pct(pf.index / 100 - 1)}</b></div></div>
+            <p class="tiny muted" style="margin:4px 0 8px">Sedan start ${esc(fmtDag(pf.start))}, efter ${pct(R.kostnad, 1, false)} avgift per affär. Låtsaspengar – följs dag för dag så att du kan se hur den faktiskt går.</p>
+            ${hi.datum.length >= 5 ? `<div id="apfchart"></div>` : ""}
+            <div class="list">${pf.innehav.map((x) => rad(x, `<span class="num ${cls(x.utv)}">${pct(x.utv)}</span>${po(x)}`)).join("")}</div>`
+          : `<p class="small">Portföljen startar när de första köpen är gjorda (nästa handelsdag). Sedan följs den dag för dag mot S&P 500, så att du kan se hur algoritmen faktiskt går – inte bara i test.</p>`}
+          <p class="tiny muted" style="margin-top:10px">Regler: ${R.antal} aktier, högst ${R.max_bransch} per bransch. Beslut fyra gånger per år. En aktie säljs först när den fallit ur den bästa femtedelen (cirka ${R.buffert} aktier). Pengarna från det som säljs delas lika på de nya köpen.</p></div>`;
+      return `<div class="card"><h2>Algoritmen</h2>
+          <p class="small">En datormodell som har tränats på ${num(U.tränad_på, 0)} exempel ur 20 års kurshistorik. Varje vardagskväll ger den alla aktier en poäng från 0 till 100 och sköter en egen portfölj med ${R.antal} aktier. Ingen AI, inga krediter.</p>
+          <div class="callout">${omdome} <a href="#" data-go="test">Se testet</a></div></div>
+        ${besl}${port}
+        <div id="akrasch"></div>`;
+    };
+
+    const vRank = () => `<div class="card"><h2>Högst poäng idag</h2>
+        <p class="small muted" style="margin:-4px 0 6px">De ${R.antal} första är algoritmens köpkandidater. S&P 500, ${U.index} aktier.</p>
+        <div class="list">${d.topp.map((x) => rad(x, `<span class="tiny muted">#${x.rank}</span>${po(x)}`)).join("")}</div></div>
+      <div class="card"><h2>Lägst poäng idag</h2>
+        <p class="small muted" style="margin:-4px 0 6px">Aktier algoritmen håller sig borta från just nu. Det betyder inte att de måste falla.</p>
+        <div class="list">${d.botten.map((x) => rad(x, `<span class="tiny muted">#${x.rank}</span>${po(x)}`)).join("")}</div></div>
+      <p class="small muted" style="margin:0 4px">Poäng finns också för ${num(U.övriga, 0)} andra amerikanska aktier. Sök upp en aktie så ser du dess poäng under rubriken Algoritmen.</p>`;
+
+    const vTest = () => {
+      const mx = Math.max(...T.tiondelar.map(Math.abs), 0.01);
+      const tack = (U.täckning || []).find((x) => x[0] === +T.från.slice(0, 4)) || (U.täckning || [])[0];
+      const va = T.varianter || [];
+      return `<div class="card"><h2>Hade algoritmen fungerat förut?</h2>
+          <p class="small muted" style="margin:-4px 0 8px">Test ${T.från.slice(0, 4)}–${T.till.slice(0, 4)}. Varje år tränades modellen bara på data från åren före och prövades sedan på året efter. ${pct(R.kostnad, 1, false)} avgift per affär är avdragen.</p>
+          <div class="atiles three"><div><span class="tiny muted">Algoritmen</span><b>${pct(T.algoritm.cagr)}</b><span class="tiny muted">per år</span></div>
+            <div><span class="tiny muted">S&P 500</span><b>${pct(T.index.cagr)}</b><span class="tiny muted">per år</span></div>
+            <div><span class="tiny muted">Snittaktien</span><b>${pct(T.snitt.cagr)}</b><span class="tiny muted">per år</span></div></div>
+          <div class="callout">${algoSlutsats(T)}</div>
+          <div id="atestchart"></div>
+          <div class="alegend tiny"><span><i style="background:var(--accent)"></i>Algoritmen</span><span><i style="background:var(--muted)"></i>S&P 500</span><span class="muted">Värdet av 100 kr som sattes in ${T.från.slice(0, 4)}</span></div>
+          ${kv("Största ras", `${pct(T.algoritm.maxdd, 0)} <span class="muted">(index ${pct(T.index.maxdd, 0)})</span>`)}
+          ${kv("Bättre än index", `${T.år_bättre} av ${T.år.length} år`)}
+          ${T.bättre_3år != null ? kv("Bättre än index över 3 år", `${pct(T.bättre_3år, 0, false)} av alla 3-årsperioder`) : ""}
+          ${T.byten != null ? kv("Byten per beslut", `cirka ${num(T.byten, 0)} av ${R.antal} aktier`) : ""}
+          ${va.length ? kv("Med beslut andra månader", va.map((v) => pct(v.cagr)).join(" och ") + " per år", "Samma regler, men besluten tas i februari/maj/augusti/november eller mars/juni/september/december. Visar hur mycket resultatet beror på tillfälligheter.") : ""}
+        </div>
+        <div class="card"><h2>År för år</h2>
+          <table class="ktab"><thead><tr><th>År</th><th>Algoritmen</th><th>S&P 500</th><th>Skillnad</th></tr></thead><tbody>
+          ${T.år.map((a) => `<tr><td>${a.år}${a.månader < 12 ? "*" : ""}</td><td class="${cls(a.algoritm)}">${pct(a.algoritm, 0)}</td><td class="${cls(a.index)}">${pct(a.index, 0)}</td><td class="${cls(a.algoritm - a.index)}">${pct(a.algoritm - a.index, 0)}</td></tr>`).join("")}
+          </tbody></table>${T.år.some((a) => a.månader < 12) ? `<p class="tiny muted">*Inte ett helt år.</p>` : ""}</div>
+        <div class="card"><h2>Kan den skilja bra aktier från dåliga?</h2>
+          <p class="small">Aktierna delas i tio lika stora grupper efter poäng. Staplarna visar hur varje grupp gick de följande 3 månaderna jämfört med snittaktien, omräknat per år.</p>
+          <div class="adec">${T.tiondelar.map((x, i) => `<div><span class="abarv"><i class="${x >= 0 ? "pos" : "neg"}" style="height:${(Math.abs(x) / mx) * 46}%;${x >= 0 ? "bottom:50%" : "top:50%"}"></i></span><span class="tiny">${pct(x, 0)}</span></div>`).join("")}</div>
+          <div class="tiny muted ascale"><span>lägst poäng</span><span>högst poäng</span></div>
+          <p class="small" style="margin-top:8px">Gruppen med högst poäng gick ${pct(T.tiondelar[9])} per år mot snittet och den med lägst ${pct(T.tiondelar[0])}. ${Math.abs(T.ic_t) >= 2.5 && T.tiondelar[9] > T.tiondelar[0] ? "Mönstret är tydligt i testet, men kan vara svagare i verkligheten." : "Mönstret är svagt och ojämnt – modellens träffsäkerhet för enskilda aktier är inte bevisad."}</p></div>
+        <div class="card"><h2>Varför verkligheten kan bli sämre än testet</h2>
+          <ul class="alist small">
+            <li><b>Bolag saknas.</b> Aktier som köpts upp eller gått i konkurs finns inte kvar hos Yahoo.${tack ? ` År ${tack[0]} hade testet data för ${tack[1]} av indexets ${tack[2]} bolag.` : ""} Det gör testet snällare än verkligheten.</li>
+            <li><b>Flera varianter har provats.</b> Den här valdes för att den är rimlig, inte för att den såg bäst ut. Men ju fler försök, desto större risk att ett bra resultat är slump.</li>
+            <li><b>Större svängningar.</b> Med bara ${R.antal} aktier slår enskilda bolag hårt. Algoritmen har gått sämre än index flera år i rad.</li>
+            <li><b>Bara kursdata.</b> Modellen ser inte rapporter, nyheter eller värdering. För det, se Värdering och Förväntad avkastning på aktiesidan.</li>
+            <li><b>Historik är ingen garanti.</b> Mönster som fanns förr kan försvinna.</li>
+          </ul>
+          <div class="callout">Använd algoritmen som ett av flera underlag – inte som facit. Portföljen under Beslut följs dag för dag, så med tiden syns det hur den går på riktigt.</div></div>`;
+    };
+
+    const vMetod = () => `<div class="card"><h2>Så fungerar algoritmen</h2>
+        <ol class="alist small">
+          <li><b>Data.</b> Dagliga kurser och handel sedan 2004 för ${num(U.aktier_i_data, 0)} aktier som är eller har varit med i S&P 500. Modellen vet vilka bolag som var med i indexet vid varje tidpunkt, så den kan inte "fuska" genom att bara välja dagens vinnare.</li>
+          <li><b>Mått.</b> 18 mått räknas för varje aktie, till exempel hur den gått senaste året och hur mycket den svänger. Varje mått görs om till en rangordning mellan aktierna.</li>
+          <li><b>Mål.</b> Modellen tränas att hitta aktier som går bättre än andra i samma bransch med samma risk, ${R.sikt.join(" och ")} månader framåt. Det som bara beror på att hela börsen gick upp räknas bort.</li>
+          <li><b>Modell.</b> ${R.modeller} modeller med beslutsträd (gradient boosting) tränas på ${num(U.tränad_på, 0)} exempel. Poängen är snittet av dem.</li>
+          <li><b>Beslut.</b> Fyra gånger per år köps de ${R.antal} högst rankade (högst ${R.max_bransch} per bransch). En aktie säljs först när den fallit ur den bästa femtedelen.</li>
+        </ol>
+        <p class="tiny muted">Uppdateras varje vardagskväll. Källor: Yahoo Finance (kurser) och en öppen lista över S&P 500:s historiska medlemmar.</p></div>
+      <div class="card"><h2>Vad modellen tittar på</h2>
+        <p class="small muted" style="margin:-4px 0 8px">Hur mycket varje område påverkar poängen just nu. Pilen visar åt vilket håll: ↑ högt värde ger oftast högre poäng, ↓ lägre.</p>
+        ${d.teman.map((x) => `<details class="sig"><summary><div class="sighead"><b>${esc(x.namn)}</b><span class="srisk">${pct(x.vikt, 0, false)}</span></div>
+          <div class="sbar" style="margin-left:0"><i style="width:${Math.min(100, x.vikt * 250)}%;background:var(--accent)"></i></div></summary>
+          <p class="small" style="margin-left:0">${esc(x.text)}</p>
+          ${x.faktorer.map((f) => `<div class="afak small"><span>${f.riktning > 0.15 ? "↑" : f.riktning < -0.15 ? "↓" : "↕"} ${esc(f.namn)}</span><span class="muted">${pct(f.vikt, 0, false)}</span></div>`).join("")}</details>`).join("")}
+        <p class="tiny muted">Sambanden är inte raka linjer. Modellen kan till exempel gilla en aktie som fallit – men bara om den inte svänger för mycket.</p></div>`;
+
+    const draw = () => {
+      charts.splice(0).forEach((c) => c.remove());
+      $("#aseg").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x.dataset.k === tab));
+      $("#abody").innerHTML = { beslut: vBeslut, rank: vRank, test: vTest, metod: vMetod }[tab]();
+      $("#abody").querySelectorAll("[data-go]").forEach((a) => (a.onclick = (e) => { e.preventDefault(); tab = a.dataset.go; LS.set("algoTab", tab); draw(); window.scrollTo(0, 0); }));
+      if (!window.LightweightCharts) return;
+      const linje = (id, h, datum, serier, logg) => {
+        const el = $(id);
+        if (!el) return;
+        const c = LightweightCharts.createChart(el, { ...lwOptions(el, col, h), localization: { locale: "sv-SE", priceFormatter: (v) => num(v, 0) } });
+        charts.push(c);
+        if (logg) c.priceScale("right").applyOptions({ mode: 1 });
+        serier.forEach(([vals, farg, w]) => c.addLineSeries({ color: farg, lineWidth: w, priceLineVisible: false, lastValueVisible: false }).setData(datum.map((t, i) => ({ time: t, value: vals[i] }))));
+        c.timeScale().fitContent();
+      };
+      if (tab === "test") linje("#atestchart", 200, T.kurva.datum, [[T.kurva.index.map((x) => x * 100), col("--muted"), 1.5], [T.kurva.algoritm.map((x) => x * 100), col("--accent"), 2]], true);
+      if (tab === "beslut") {
+        linje("#apfchart", 150, pf.historik.datum, [[pf.historik.index, col("--muted"), 1.5], [pf.historik.algoritm, col("--accent"), 2]], false);
+        loadKrasch().then((k) => {
+          if (current !== me || !$("#akrasch")) return;
+          $("#akrasch").innerHTML = `<a class="mbanner" href="#/marknad" style="--zc:${zvar(k.zon)};margin:0 0 12px"><span class="mdot"></span><span class="mtxt"><b>Börsläget: ${esc(k.zonnamn)} ${k.poäng}/100</b>
+            <span>Algoritmen väljer aktier. Krasch-mätaren säger hur mycket risk du bör ta.</span></span><span class="mgo">›</span></a>`;
+        }).catch(() => {});
+      }
+    };
+    view.innerHTML = `<div class="seg" id="aseg">${SEG.map(([k, n]) => `<button data-k="${k}">${n}</button>`).join("")}</div><div id="abody"></div>
+      <p class="disclaimer">Uppdaterad ${esc(fmtDag(d.uppdaterad))}${d.demo ? " · TESTDATA" : ""}. Algoritmen är ett räkneexempel på data, inte finansiell rådgivning. Historiska resultat är ingen garanti för framtiden.</p>`;
+    $("#aseg").onclick = (e) => { const k = e.target.closest("button"); if (!k) return; tab = k.dataset.k; LS.set("algoTab", tab); draw(); };
+    draw();
+  }
+
   // ---------- Portfölj ----------
   const RAD_CLS = { "Köp mer": "buy", "Behåll": "neutral", "Sälj delvis": "hold", "Sälj": "avoid" };
   let portfolio = LS.get("portCache", []);
@@ -1083,8 +1279,9 @@
     current = me;
     const gone = () => current !== me;
     const sigs = {}, prices = {}, open = new Set();
-    let cands = [], advice = null, aiBusy = false, settings = { dagligAI: false }, tipsLog = null, updatedAt = null;
+    let cands = [], advice = null, aiBusy = false, settings = { dagligAI: false }, tipsLog = null, updatedAt = null, algoD = null;
     let hz = LS.get("portHz", 3), belopp = LS.get("portBelopp", "");
+    loadAlgo().then((d) => { algoD = d; if (!gone() && portfolio.length && $("#plist")) renderAll(); }).catch(() => {});
     view.innerHTML = `<div id="pform"></div><div id="psum"></div><div id="plist"><div class="card"><div class="skeleton" style="height:120px"></div></div></div><div id="pai"></div>
       <p class="disclaimer">Underlag för egna beslut – inte finansiell rådgivning.</p>`;
 
@@ -1166,7 +1363,7 @@
           const alts = tip && /Sälj/.test(tip.råd) ? betterAlternatives(x.sig, cands, owned) : [];
           const kv = (k, v) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`;
           return `<details class="hold" data-t="${esc(x.t)}" ${open.has(x.t) ? "open" : ""}><summary class="row">
-              <div class="main"><b>${esc(x.t)}</b><span>${esc(x.namn || "")}</span><span>${pct(x.vikt, 0, false)} av portföljen${x.r[3] != null ? ` · väntas ${pct(x.r[3], 0)}/år` : ""}</span></div>
+              <div class="main"><b>${esc(x.t)}${algoBadge(algoD, x.t)}</b><span>${esc(x.namn || "")}</span><span>${pct(x.vikt, 0, false)} av portföljen${x.r[3] != null ? ` · väntas ${pct(x.r[3], 0)}/år` : ""}</span></div>
               <div class="side">${tip ? `<span class="pill ${RAD_CLS[tip.råd]}">${esc(tip.råd)}</span>` : '<span class="spinner" style="width:14px;height:14px"></span>'}
                 ${was ? `<span class="tiny" style="display:block;margin-top:4px;color:var(--warn)">Ändrat · var ${esc(was)}</span>` : ""}</div></summary>
             <div class="holdbody">
@@ -1177,6 +1374,7 @@
               ${x.sig && x.sig.värdering ? kv("Värdering", esc(x.sig.värdering.läge)) : ""}
               ${x.sig && x.sig.hype ? kv("Hype", `${x.sig.hype.poäng}/100 · ${esc(x.sig.hype.nivå)}`) : ""}
               ${x.sig && x.sig.ägarbetyg ? kv("Ägarbetyg", esc(x.sig.ägarbetyg)) : ""}
+              ${(() => { const a = algoFor(algoD, x.t); return a ? kv("Algoritmen (3–6 mån)", `<span class="pill ${a.cls}">${a.rad}</span> ${Math.round(a.p)} av 100`) : ""; })()}
               ${tip ? `<p class="small" style="margin:10px 0 4px"><b>Varför ${esc(tip.råd.toLowerCase())}?</b></p><ul class="pts small">${tip.skäl.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>` : ""}
               ${ai ? `<div class="callout"><b>AI-genomgången ${esc(ago(advice.skapad))}: ${esc(ai.råd)}.</b> ${esc(ai.kort)} <span class="small">${esc(ai.motivering)}</span></div>` : ""}
               ${(ai && ai.alternativ.length) || alts.length ? `<h3>Bättre att investera i istället</h3>${(ai && ai.alternativ.length ? ai.alternativ.map((a) => ({ ...(cands.find((k) => k.t === a.t) || { t: a.t }), varför: a.varför })) : alts)
@@ -1185,7 +1383,13 @@
               <div class="btnrow"><a class="btn sec" href="#/aktie/${encodeURIComponent(x.t)}">Öppna</a><button class="btn sec" data-edit="${esc(x.t)}">Ändra</button><button class="btn sec" data-del="${esc(x.t)}">Ta bort</button></div>
             </div></details>`;
         }).join("")}
-        <p class="tiny muted" style="margin-top:8px">Tipsen bygger på förväntad avkastning per år, värdering, hype och hur stor del av portföljen aktien är. Tryck på en aktie för att se varför.</p></div>`;
+        <p class="tiny muted" style="margin-top:8px">Tipsen bygger på förväntad avkastning per år, värdering, hype och hur stor del av portföljen aktien är. Tryck på en aktie för att se varför.</p>
+        ${(() => {
+          const xs = c.list.map((x) => [x.vikt, algoFor(algoD, x.t)]).filter(([, a]) => a), tot = xs.reduce((n, [v]) => n + v, 0);
+          if (!xs.length || !tot) return "";
+          const snitt = xs.reduce((n, [v, a]) => n + v * a.p, 0) / tot, antal = (r) => xs.filter(([, a]) => a.rad === r).length;
+          return `<p class="small" style="margin-top:8px">Siffran vid kortnamnet är <a href="#/algoritm">algoritmens</a> poäng (0–100). Din portfölj har i snitt <b>${Math.round(snitt)}</b>, vägt efter storlek: ${antal("Köp")} köp, ${antal("Behåll")} behåll, ${antal("Avstå")} avstå.</p>`;
+        })()}</div>`;
       el.querySelectorAll("details.hold").forEach((d) => d.addEventListener("toggle", () => (d.open ? open.add(d.dataset.t) : open.delete(d.dataset.t))));
       el.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => showForm(portfolio.find((x) => x.t === b.dataset.edit))));
       el.querySelectorAll("[data-del]").forEach((b) => (b.onclick = async () => {

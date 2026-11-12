@@ -46,6 +46,12 @@ jobs:
           sig = json.load(urllib.request.urlopen(urllib.request.Request(f"{url}/api/signal?t={os.environ['T']}", headers={"X-App-Key": os.environ["APP_KEY"], "User-Agent": "aktieagent-kontroll"}), timeout=60))
           print(f"::notice title=Signal::pris {sig.get('pris')} kursmål 3 år {(sig.get('horisonter') or {}).get('3')} utdelning {sig.get('utdelning')}")
           print(f"::notice title=App-kod::{'KORT (under 16 tecken)' if ping.get('svagKod') else 'stark'} · AI {'AVSTÄNGD' if ping.get('aiAv') else 'PÅ'}")
+          try:
+              al = json.load(open("docs/data/algoritm.json", encoding="utf-8"))
+              tt, pf = al["test"], al["portfölj"]
+              print(f"::notice title=Algoritmen::uppdaterad {al['uppdaterad']} · {len(al['aktier'])} aktier med poäng · test {tt['algoritm']['cagr']:+.1%}/år mot index {tt['index']['cagr']:+.1%} · portfölj {pf['värde']:.1f} mot index {pf['index']:.1f} sedan {pf['start']} · senaste beslut {pf['beslut']['datum'] if pf['beslut'] else '–'}")
+          except Exception as e:
+              print(f"::warning title=Algoritmen::kunde inte läsas ({e})")
           import time
           H = {"X-App-Key": os.environ["APP_KEY"], "User-Agent": "aktieagent-kontroll"}
           wl = json.load(urllib.request.urlopen(urllib.request.Request(f"{url}/api/watchlist", headers=H), timeout=30))

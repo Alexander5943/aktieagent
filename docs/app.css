@@ -309,3 +309,41 @@ ul.pm.plus li span{color:var(--up)} ul.pm.minus li span{color:var(--down)}
 .ktab th{text-align:left;color:var(--muted);font-weight:600;font-size:12px;padding:6px 4px}
 .ktab td{padding:7px 4px;border-top:1px solid var(--line)}
 .ktab .pill{font-size:12px}
+
+/* Algoritmen */
+.abadge{display:inline-block;font-style:normal;font-size:11px;font-weight:700;line-height:1;padding:3px 5px;border-radius:6px;vertical-align:2px;margin-left:4px;font-variant-numeric:tabular-nums;color:#fff}
+.abadge.buy{background:var(--buy)} .abadge.hold{background:var(--hold)} .abadge.neutral{background:var(--soft);color:var(--muted);box-shadow:inset 0 0 0 1px var(--line)}
+.ahead{display:flex;align-items:center;gap:10px}
+.ahead .pill{font-size:14px;padding:5px 12px}
+.apo{font-size:14px;color:var(--muted)} .apo b{font-size:22px;color:var(--text);font-variant-numeric:tabular-nums}
+.ameter{position:relative;height:8px;border-radius:4px;margin:12px 0 4px;background:linear-gradient(90deg,var(--line) 0 var(--b,80%),var(--hold) var(--b,80%) var(--k,96%),var(--buy) var(--k,96%) 100%)}
+.ameter i{position:absolute;top:-2px;width:2px;height:12px;background:var(--card)}
+.ameter b{position:absolute;top:-5px;width:6px;height:18px;margin-left:-3px;border-radius:3px;background:var(--text);box-shadow:0 0 0 2px var(--card)}
+.ascale{display:flex;justify-content:space-between;gap:8px}
+.askal{margin:8px 0}
+.askrow{display:grid;grid-template-columns:1fr 90px 52px;align-items:center;gap:8px;font-size:14px;padding:5px 0;border-top:1px solid var(--line)}
+.askrow:first-child{border-top:0}
+.askrow span:last-child{text-align:right;font-size:13px}
+.abar{position:relative;height:6px;border-radius:3px;background:var(--soft)}
+.abar::after{content:"";position:absolute;left:50%;top:-2px;width:1px;height:10px;background:var(--line)}
+.abar i{position:absolute;top:0;height:6px;border-radius:3px}
+.abar i.pos{left:50%;background:var(--up)} .abar i.neg{right:50%;background:var(--down)}
+.ah3{font-size:14px;margin:14px 0 2px;font-weight:600;color:var(--muted)}
+.ah3 .pill{margin-right:6px}
+.aside{display:flex;align-items:center;gap:8px}
+.aside .num{font-variant-numeric:tabular-nums;font-size:14px}
+.atiles{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:4px 0}
+.atiles.three{grid-template-columns:repeat(3,1fr)}
+.atiles div{background:var(--soft);border-radius:12px;padding:10px 8px;text-align:center;display:flex;flex-direction:column;gap:2px}
+.atiles b{font-size:20px;font-variant-numeric:tabular-nums}
+.alegend{display:flex;flex-wrap:wrap;gap:4px 12px;margin:4px 0 10px}
+.alegend i{display:inline-block;width:12px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.adec{display:grid;grid-template-columns:repeat(10,1fr);gap:3px;margin-top:8px}
+.adec div{display:flex;flex-direction:column;align-items:center;gap:2px}
+.adec .tiny{font-size:10px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.abarv{position:relative;width:100%;height:90px;background:linear-gradient(var(--line),var(--line)) center/100% 1px no-repeat}
+.abarv i{position:absolute;left:12%;right:12%;border-radius:3px}
+.abarv i.pos{background:var(--up)} .abarv i.neg{background:var(--down)}
+.alist{margin:6px 0;padding-left:20px} .alist li{margin:7px 0}
+.afak{display:flex;justify-content:space-between;gap:8px;padding:4px 0}
+#apfchart{margin:6px 0}

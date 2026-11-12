@@ -70,7 +70,6 @@ N_INNEHAV = 20         # antal aktier i algoritmens portfölj
 BUFFERT = 0.20         # en aktie behålls så länge den är bland den bästa femtedelen (cirka 100 av 500)
 MAX_SEKTOR = 5         # högst så många aktier per bransch
 KOSTNAD = 0.003        # avgift per köp eller sälj (courtage + valutaväxling)
-KOP_P, SALJ_P = 90, 10  # poäng (0–100): Köp från 90, Sälj under 10
 BESLUT_MANADER = (1, 4, 7, 10)   # beslut tas första handelsdagen i januari, april, juli och oktober
 HORISONTER = (1, 3, 6)  # månader framåt som sparas i träningsdatan
 MAL = (3, 6)           # modellerna tränas att förutse 3 respektive 6 månader framåt
@@ -849,7 +848,7 @@ def main():
     tema_ix = [[j for j, (_, t) in enumerate(FAKTORER) if t == tid] for tid in TID]
     tb = np.column_stack([utan(js) for js in tema_ix])
     skala = float(np.abs(tb[karna]).max()) or 1.0
-    aktier = {tick[j]: {"p": int(round(p100[n])), "k": int(karna[n]), "s": [int(round(x / skala * 100)) for x in tb[n]]} for n, j in enumerate(ix)}
+    aktier = {tick[j]: {"p": round(float(p100[n]), 1), "k": int(karna[n]), "s": [int(round(x / skala * 100)) for x in tb[n]]} for n, j in enumerate(ix)}
     ordn = [tick[ix[n]] for n in np.argsort(-po, kind="stable") if karna[n]]
     vikt_tema = np.abs(tb[karna]).mean(0)
     fb = np.column_stack([utan([j]) for j in range(len(FID))])[karna]
@@ -890,7 +889,9 @@ def main():
     w_tot, f_tot = float(vikt_tema.sum()) or 1.0, float(vikt_fakt.sum()) or 1.0
     ut = {
         "uppdaterad": dstr, "skapad": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"), "demo": bool(args.demo),
-        "regler": {"antal": N_INNEHAV, "buffert": buffert(len(ordn)), "max_bransch": MAX_SEKTOR, "kostnad": KOSTNAD, "köp": KOP_P, "sälj": SALJ_P,
+        # Poänggränser som motsvarar portföljens regler: "köp" = bland de 20 bästa, "behåll" = bland den bästa femtedelen
+        "regler": {"antal": N_INNEHAV, "buffert": buffert(len(ordn)), "max_bransch": MAX_SEKTOR, "kostnad": KOSTNAD,
+                   "köp": round(100 * (1 - N_INNEHAV / len(ordn)), 2), "behåll": round(100 * (1 - buffert(len(ordn)) / len(ordn)), 2),
                    "månader": list(BESLUT_MANADER), "sikt": list(MAL), "modeller": len(slut.gs)},
         "universum": {"index": int(karna.sum()), "övriga": int((~karna).sum()), "tränad_på": slut.n, "månader": sum(r["klar"] for r in rader),
                       "från": rader[0]["datum"].strftime("%Y-%m-%d"), "aktier_i_data": len(D.tick),
