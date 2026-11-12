@@ -48,14 +48,15 @@ OUT = os.path.join(ROOT, "docs", "data", "algoritm.json")
 KRASCH = os.path.join(ROOT, "docs", "data", "krasch.json")
 NU_URL = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv"
 HIST_URL = "https://raw.githubusercontent.com/fja05680/sp500/master/S%26P%20500%20Historical%20Components%20%26%20Changes%20(Updated).csv"
-MIN_OMS_INDEX = 2e6    # skydd mot fel bolag under samma kortnamn: indexbolag handlas alltid för mer än så
+MIN_KVOT = 0.03        # skydd mot fel bolag under samma kortnamn: ett indexbolag handlas aldrig för mindre än 3 % av medianbolaget
+FEL_DATA = {"PARA"}    # kortnamn där Yahoo har trasig data
 # Bolag som bytt kortnamn: gammalt namn -> det namn Yahoo har kurserna under idag
 ALIAS = {
     "FB": "META", "PCLN": "BKNG", "ANTM": "ELV", "WLP": "ELV", "HCN": "WELL", "KORS": "CPRI", "COG": "CTRA", "RE": "EG", "PKI": "RVTY",
     "ABC": "COR", "FLT": "CPAY", "WLTW": "WTW", "BLL": "BALL", "DISCA": "WBD", "TMK": "GL", "LUK": "JEF", "HRS": "LHX", "SYMC": "GEN",
     "NLOK": "GEN", "UTX": "RTX", "CTL": "LUMN", "MYL": "VTRS", "JEC": "J", "BBT": "TFC", "ADS": "BFH", "FBHS": "FBIN", "GPS": "GAP",
     "HFC": "DINO", "LB": "BBWI", "COH": "TPR", "WYN": "TNL", "KFT": "MDLZ", "DPS": "KDP", "PX": "LIN", "HCP": "DOC", "PEAK": "DOC",
-    "CBG": "CBRE", "BHGE": "BKR", "BHI": "BKR", "ZMH": "ZBH", "DLPH": "APTV", "FI": "FISV", "FISV": "FI", "CDAY": "DAY",
+    "CBG": "CBRE", "BHGE": "BKR", "BHI": "BKR", "ZMH": "ZBH", "DLPH": "APTV", "FI": "FISV", "FISV": "FI", "CDAY": "DAY", "ARNC": "HWM",
 }
 
 START = "2004-01-01"   # kursdata hämtas härifrån
@@ -66,6 +67,9 @@ MAX_SEKTOR = 5         # högst så många aktier per bransch
 KOSTNAD = 0.003        # avgift per köp eller sälj (courtage + valutaväxling)
 KOP_P, SALJ_P = 90, 20  # poäng (0–100) för Köp respektive Sälj
 VAL = "ens"            # modell som används: "ridge", "gbm" eller "ens" (snittet av båda)
+HORISONTER = (1, 3, 6)  # månader framåt som sparas i träningsdatan
+HORISONT = 1           # så många månader framåt modellen tränas att förutse
+JUSTERA = False        # räkna bort börsens rörelse ur målet (se satt_mal)
 RIDGE_L = 0.02
 MIN_OMS, MIN_KURS = 5e6, 2.0   # övriga aktier: minst så stor daglig handel ($) och kurs
 
@@ -74,7 +78,7 @@ FAKTORER = [
     ("m12", "trend"), ("m6", "trend"), ("rjm", "trend"), ("topp", "trend"), ("ma200", "trend"), ("jamn", "trend"),
     ("m1", "rekyl"), ("v1", "rekyl"), ("max1", "rekyl"),
     ("vol3", "risk"), ("vol12", "risk"), ("beta", "risk"), ("ivol", "risk"), ("ras", "risk"),
-    ("oms", "handel"), ("storlek", "handel"),
+    ("oms", "handel"),
     ("hopp", "rapport"), ("sasong", "sasong"), ("sektor", "bransch"),
 ]
 FID = [f for f, _ in FAKTORER]
@@ -83,14 +87,14 @@ FNAMN = {
     "topp": "Närhet till årshögsta", "ma200": "Avstånd till 200-dagars snitt", "jamn": "Andel dagar med uppgång",
     "m1": "Kurs senaste månaden", "v1": "Kurs senaste veckan", "max1": "Största dagsuppgång senaste månaden",
     "vol3": "Svängningar 3 månader", "vol12": "Svängningar 12 månader", "beta": "Följsamhet mot börsen (beta)",
-    "ivol": "Egna svängningar", "ras": "Största ras senaste året", "oms": "Ökad handel", "storlek": "Storlek på handeln",
+    "ivol": "Egna svängningar", "ras": "Största ras senaste året", "oms": "Ökad handel",
     "hopp": "Reaktion på senaste rapporten", "sasong": "Säsong", "sektor": "Branschens trend",
 }
 TEMAN = [
     ("trend", "Trend", "Hur aktien har gått det senaste året och halvåret, och hur nära sin högsta kurs den är."),
     ("rekyl", "Senaste veckorna", "Hur aktien har rört sig den senaste månaden och veckan. Väldigt snabba rörelser brukar delvis gå tillbaka."),
     ("risk", "Svängningar", "Hur mycket aktien svänger, hur känslig den är för börsen och hur djupt den har fallit senaste året."),
-    ("handel", "Handel", "Hur mycket aktien handlas och om intresset ökar eller minskar."),
+    ("handel", "Handel", "Om handeln i aktien har ökat eller minskat den senaste månaden jämfört med året."),
     ("rapport", "Senaste rapporten", "Hur kursen reagerade den dag aktien handlades mest under senaste kvartalet – oftast rapportdagen."),
     ("sasong", "Säsong", "Hur aktien brukar gå just den här månaden på året."),
     ("bransch", "Branschen", "Hur aktiens bransch har gått det senaste halvåret."),
@@ -156,8 +160,16 @@ def medlemskap(hist: list, medl: dict, datum, finns) -> dict:
     Vilka aktier som var med i indexet vid varje datum (bara de som har kursdata).
     Efter den historiska listans sista datum används dagens lista. Bolag som bytt kortnamn letas upp via ALIAS.
     """
-    finns = set(finns)
-    los = lambda t: t if t in finns else ALIAS.get(t) if ALIAS.get(t) in finns else None
+    finns = set(finns) - FEL_DATA
+
+    def los(t):
+        # Ett gammalt kortnamn kan idag tillhöra ett helt annat bolag. Finns ett känt namnbyte används det i första hand.
+        if t in medl and t in finns:
+            return t
+        if ALIAS.get(t) in finns:
+            return ALIAS[t]
+        return t if t in finns else None
+
     hd = [d for d, _ in hist]
     hd64 = np.array(hd, dtype="datetime64[ns]")
     cache, ut = {}, {}
@@ -173,16 +185,19 @@ def medlemskap(hist: list, medl: dict, datum, finns) -> dict:
 
 
 def kurser(tickers: list[str], start: str | None = None, period: str | None = None, paket: int = 150):
-    """Justerade stängningskurser och antal handlade aktier från Yahoo Finance."""
+    """
+    Från Yahoo Finance: justerad stängningskurs (med utdelningar, för avkastning), ojusterad stängningskurs
+    (för att räkna handel i dollar utan att framtida utdelningar smyger in) och antal handlade aktier.
+    """
     import yfinance as yf
     logging.getLogger("yfinance").setLevel(logging.CRITICAL)
-    C, V = {}, {}
+    C, P, V = {}, {}, {}
     for a in range(0, len(tickers), paket):
         chunk = tickers[a:a + paket]
         df = None
         for forsok in range(3):
             try:
-                df = yf.download(chunk, start=start, period=period, auto_adjust=True, progress=False, threads=True, group_by="ticker", timeout=30)
+                df = yf.download(chunk, start=start, period=period, auto_adjust=False, progress=False, threads=True, group_by="ticker", timeout=30)
                 if df is not None and not df.empty:
                     break
             except Exception as e:  # noqa: BLE001
@@ -193,17 +208,17 @@ def kurser(tickers: list[str], start: str | None = None, period: str | None = No
         for t in chunk:
             try:
                 h = df[t] if isinstance(df.columns, pd.MultiIndex) else df
-                c = h["Close"].dropna()
+                c = h["Adj Close"].dropna()
             except (KeyError, TypeError):
                 continue
             if len(c) >= 60:
-                C[t], V[t] = c, h["Volume"].reindex(c.index)
+                C[t], P[t], V[t] = c, h["Close"].reindex(c.index), h["Volume"].reindex(c.index)
         print(f"  kurser {min(a + paket, len(tickers))}/{len(tickers)} ({len(C)} med data)", flush=True)
-    C, V = pd.DataFrame(C), pd.DataFrame(V)
-    for d in (C, V):
+    C, P, V = pd.DataFrame(C), pd.DataFrame(P), pd.DataFrame(V)
+    for d in (C, P, V):
         idx = pd.to_datetime(d.index)
         d.index = idx.tz_localize(None) if getattr(idx, "tz", None) is not None else idx
-    return C.sort_index(), V.sort_index()
+    return C.sort_index(), P.sort_index(), V.sort_index()
 
 
 def alla_usa() -> list[str]:
@@ -268,7 +283,7 @@ def demo_data(seed: int = 1, effekt: float = 0.0, n: int = 220, start: str = "20
     hist.append((d[0], frozenset(cur)))
     hist.sort(key=lambda x: x[0])
     spy = pd.Series(100 * np.exp(np.cumsum(mkt)), index=d)
-    return C, V.where(C.notna()), spy, medl, hist
+    return C, C.copy(), V.where(C.notna()), spy, medl, hist
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +292,8 @@ def demo_data(seed: int = 1, effekt: float = 0.0, n: int = 220, start: str = "20
 class Data:
     """Kursmatris (dagar × aktier) med det som behövs för att räkna faktorer."""
 
-    def __init__(self, C: pd.DataFrame, V: pd.DataFrame, spy: pd.Series):
+    def __init__(self, C: pd.DataFrame, P: pd.DataFrame, V: pd.DataFrame, spy: pd.Series):
+        """C = justerade kurser (avkastning), P = ojusterade kurser (handel i dollar), V = antal handlade aktier."""
         self.dates = spy.dropna().index
         C = C.reindex(self.dates)
         self.tick = list(C.columns)
@@ -287,7 +303,7 @@ class Data:
         self.R = np.full_like(self.Pb, np.nan)
         self.R[1:] = self.Pb[1:] / self.Pb[:-1] - 1
         self.Vol = V.reindex(self.dates).reindex(columns=self.tick).to_numpy(float)
-        self.DV = self.Vol * self.Pb
+        self.DV = self.Vol * P.reindex(self.dates).reindex(columns=self.tick).ffill(limit=5).to_numpy(float)
         self.m = spy.reindex(self.dates).to_numpy(float)
         self.Rm = np.full(len(self.m), np.nan)
         self.Rm[1:] = self.m[1:] / self.m[:-1] - 1
@@ -339,7 +355,7 @@ class Data:
         f["max1"] = np.nanmax(r21, 0)
         dv = self.DV
         f["oms"] = np.nanmean(dv[i - 20:i + 1], 0) / np.nanmean(dv[i - 251:i + 1], 0)
-        f["storlek"] = np.log(np.nanmean(dv[i - 62:i + 1], 0))
+        f["_oms"] = np.nanmean(dv[i - 62:i + 1], 0)   # handel i dollar per dag (används bara som skydd, inte i modellen)
         v63 = np.where(np.isfinite(self.Vol[i - 62:i + 1]), self.Vol[i - 62:i + 1], -1.0)
         j = v63.argmax(0)
         hopp = r63[j, np.arange(len(p))]
@@ -373,7 +389,9 @@ def rang_mot(x: np.ndarray, bas: np.ndarray) -> np.ndarray:
 def tvarsnitt(D: Data, i: int, medl_mask: np.ndarray, sek_ix: np.ndarray, extra_mask: np.ndarray | None = None):
     """Rangordnade faktorer vid dag i för indexets aktier (och ev. övriga, rangordnade mot indexets)."""
     f = D.faktorer(i)
-    mask = D.giltig(i) & medl_mask & (f["storlek"] >= np.log(MIN_OMS_INDEX))
+    mask = D.giltig(i) & medl_mask
+    if mask.sum() >= 20:
+        mask &= f["_oms"] >= MIN_KVOT * np.nanmedian(f["_oms"][mask])
     # Branschens trend: snittet av halvårstrenden bland indexets aktier i samma bransch
     sm = np.full(len(D.tick), np.nan)
     for s in np.unique(sek_ix[mask & (sek_ix >= 0)]):
@@ -389,7 +407,7 @@ def tvarsnitt(D: Data, i: int, medl_mask: np.ndarray, sek_ix: np.ndarray, extra_
         mask_alla = mask | em
     else:
         mask_alla = mask
-    return np.nan_to_num(X, nan=0.0), mask, mask_alla
+    return np.nan_to_num(X, nan=0.0), mask, mask_alla, f
 
 
 def signaldagar(D: Data) -> list[int]:
@@ -399,7 +417,7 @@ def signaldagar(D: Data) -> list[int]:
 
 
 def bygg(D: Data, medl: dict, hist: list):
-    """Träningsdata: en rad per aktie och månad med faktorer och hur aktien gick månaden efter."""
+    """Träningsdata: en rad per aktie och månad med faktorer och hur aktien gick 1, 3 och 6 månader efteråt."""
     sig = signaldagar(D)
     mk = medlemskap(hist, medl, [D.dates[i] for i in sig] + [D.dates[-1]], D.tick)
     sek_namn = sorted({m["s"] for m in medl.values()})
@@ -407,18 +425,37 @@ def bygg(D: Data, medl: dict, hist: list):
     rader = []
     for k, i in enumerate(sig):
         mm = np.array([t in mk[D.dates[i]][0] for t in D.tick])
-        X, mask, _ = tvarsnitt(D, i, mm, sek_ix)
-        e0 = i + 1
-        e1 = sig[k + 1] + 1 if k + 1 < len(sig) else None
-        if e1 is not None and e1 < len(D.dates):
-            fwd = np.clip(D.Pf[e1] / D.Pf[e0] - 1, -0.95, 1.5)
-            bm = D.m[e1] / D.m[e0] - 1
-        else:
-            fwd, bm = np.full(len(D.tick), np.nan), np.nan
+        X, mask, _, f = tvarsnitt(D, i, mm, sek_ix)
+        e0 = i + 1                                   # köp sker till stängningskursen dagen efter beslutet
         ok = mask & np.isfinite(D.Pf[e0])
-        rader.append({"i": i, "datum": D.dates[i], "ix": np.flatnonzero(ok), "X": X[ok], "fwd": fwd[ok], "y": rang(fwd, ok)[ok], "spy": bm,
-                      "klar": bool(np.isfinite(bm)), "medl": mk[D.dates[i]][1]})
+        fh = {}
+        for h in HORISONTER:
+            if k + h < len(sig):
+                e1 = sig[k + h] + 1
+                fh[h] = (np.clip(D.Pf[e1][ok] / D.Pf[e0][ok] - 1, -0.95, 1.5 if h == 1 else 3.0), float(D.m[e1] / D.m[e0] - 1))
+        fwd, bm = fh.get(1, (np.full(int(ok.sum()), np.nan), np.nan))
+        rader.append({"i": i, "datum": D.dates[i], "ix": np.flatnonzero(ok), "X": X[ok], "fwd": fwd, "spy": bm, "fh": fh,
+                      "beta": np.clip(np.nan_to_num(f["beta"][ok], nan=1.0), 0.0, 3.0), "klar": 1 in fh, "medl": mk[D.dates[i]][1]})
+    satt_mal(rader)
     return rader, sek_ix, sek_namn, mk
+
+
+def satt_mal(rader, h: int | None = None, justera: bool | None = None):
+    """
+    Det modellen ska lära sig förutse: aktiens rangordning efter avkastningen de kommande h månaderna.
+    justera=True räknar först bort det som bara beror på att hela börsen gick upp eller ner (beta × börsen),
+    så att modellen letar efter aktier som går bättre än sin risk motiverar – inte bara efter aktier som svänger mer.
+    """
+    h = HORISONT if h is None else h
+    justera = JUSTERA if justera is None else justera
+    for r in rader:
+        if h in r["fh"]:
+            f, bm = r["fh"][h]
+            z = f - r["beta"] * bm if justera else f
+            r["y"], r["tr"] = rang(z, np.isfinite(z)), True
+        else:
+            r["y"], r["tr"] = np.full(len(r["ix"]), np.nan), False
+    return rader
 
 
 # ---------------------------------------------------------------------------
@@ -444,7 +481,7 @@ def _r(x):
 
 class Modell:
     def __init__(self, rader, gbm=True):
-        tr = [r for r in rader if r["klar"]]
+        tr = [r for r in rader if r["tr"]]
         X = np.vstack([r["X"] for r in tr])
         y = np.concatenate([r["y"] for r in tr])
         ok = np.isfinite(y)
@@ -473,7 +510,7 @@ def walk_forward(rader, gbm=True):
     pred = {}
     for y in [a for a in ar if a >= TEST_FRAN]:
         tr = [r for r in rader if r["datum"].year < y]
-        tr = tr[:-1]   # sista månaden före teståret slutar inne i testperioden – tas bort
+        tr = tr[:-HORISONT]   # de sista månaderna före teståret slutar inne i testperioden – tas bort
         if len(tr) < 36:
             continue
         m = Modell(tr, gbm)
@@ -653,19 +690,19 @@ def uppdatera_portfolj(st: dict | None, datum: str, avk, index_avk, ordning: lis
 # ---------------------------------------------------------------------------
 # 6. Kör allt
 # ---------------------------------------------------------------------------
-def spara_data(fil, C, V, spy, medl, hist):
-    np.savez_compressed(fil, C=C.to_numpy(np.float32), V=V.reindex(index=C.index, columns=C.columns).to_numpy(np.float32), spy=spy.reindex(C.index).to_numpy(float),
-                        datum=C.index.strftime("%Y-%m-%d").to_numpy().astype("U10"), tick=np.array(C.columns, dtype="U8"), medl=json.dumps(medl, ensure_ascii=False),
-                        hist=json.dumps([[d.strftime("%Y-%m-%d"), sorted(ts)] for d, ts in hist]))
+def spara_data(fil, C, P, V, spy, medl, hist):
+    f32 = lambda d: d.reindex(index=C.index, columns=C.columns).to_numpy(np.float32)
+    np.savez_compressed(fil, C=f32(C), P=f32(P), V=f32(V), spy=spy.reindex(C.index).to_numpy(float),
+                        datum=C.index.strftime("%Y-%m-%d").to_numpy().astype("U10"), tick=np.array(C.columns, dtype="U8"),
+                        medl=json.dumps(medl, ensure_ascii=False), hist=json.dumps([[d.strftime("%Y-%m-%d"), sorted(ts)] for d, ts in hist]))
 
 
 def las_data(fil):
     z = np.load(fil, allow_pickle=False)
     idx = pd.to_datetime(z["datum"])
-    C = pd.DataFrame(z["C"].astype(float), index=idx, columns=list(z["tick"]))
-    V = pd.DataFrame(z["V"].astype(float), index=idx, columns=list(z["tick"]))
+    df = lambda k: pd.DataFrame(z[k].astype(float), index=idx, columns=list(z["tick"]))
     spy = pd.Series(z["spy"], index=idx).dropna()
-    return C, V, spy, json.loads(str(z["medl"])), [(pd.Timestamp(d), frozenset(ts)) for d, ts in json.loads(str(z["hist"]))]
+    return df("C"), df("P"), df("V"), spy, json.loads(str(z["medl"])), [(pd.Timestamp(d), frozenset(ts)) for d, ts in json.loads(str(z["hist"]))]
 
 
 def las_krasch() -> pd.Series | None:
@@ -699,11 +736,11 @@ def main():
 
     # --- Data ---
     if args.demo:
-        C, V, spy, medl, hist = demo_data(effekt=0.02)
-        Ce = Ve = None
+        C, P, V, spy, medl, hist = demo_data(effekt=0.02)
+        Ce = None
     elif args.data:
-        C, V, spy, medl, hist = las_data(args.data)
-        Ce = Ve = None
+        C, P, V, spy, medl, hist = las_data(args.data)
+        Ce = None
     else:
         medl, hist = sp500_nu(), sp500_historik()
         alla = set(medl) | set(ALIAS.values())
@@ -712,15 +749,16 @@ def main():
                 alla |= ts
         alla = sorted(alla)
         print(f"S&P 500: {len(medl)} bolag idag, historik {hist[0][0].date()}–{hist[-1][0].date()}, {len(alla)} aktier har varit med sedan {START[:4]}", flush=True)
-        C, V = kurser(alla + ["SPY"], start=START)
+        C, P, V = kurser(alla + ["SPY"], start=START)
         if "SPY" not in C or len(C) < 1500:
             print("::error::Kunde inte hämta kurser från Yahoo Finance. Den gamla filen behålls.")
             return 1
         spy = C.pop("SPY")
+        P.pop("SPY")
         V.pop("SPY")
         saknas = [t for t in medl if t not in C]
         print(f"Kurser för {C.shape[1]} av {len(alla)} aktier ({len(saknas)} av dagens bolag saknas: {saknas[:12]}) · {time.time() - t0:.0f} s", flush=True)
-        Ce = Ve = None
+        Ce = None
         if not args.utan_ovriga:
             try:
                 ovr = None
@@ -730,21 +768,21 @@ def main():
                     ovr = alla_usa()
                 ovr = [t for t in ovr if t not in C.columns]
                 print(f"Övriga amerikanska aktier: {len(ovr)} att hämta", flush=True)
-                Ce, Ve = kurser(ovr, period="2y", paket=250)
+                Ce, Pe, Ve = kurser(ovr, period="2y", paket=250)
                 senast = Ce.index[-1]
-                liq = (Ce * Ve).iloc[-60:].median()
-                ok = (liq >= MIN_OMS) & (Ce.iloc[-1] >= MIN_KURS) & Ce.iloc[-1].notna() & (Ce.notna().sum() >= 260)
-                Ce, Ve = Ce.loc[:, ok], Ve.loc[:, ok]
+                liq = (Pe * Ve).iloc[-60:].median()
+                ok = (liq >= MIN_OMS) & (Pe.iloc[-1] >= MIN_KURS) & Ce.iloc[-1].notna() & (Ce.notna().sum() >= 260)
+                Ce, Pe, Ve = Ce.loc[:, ok], Pe.loc[:, ok], Ve.loc[:, ok]
                 print(f"  {Ce.shape[1]} med tillräcklig handel (till {senast.date()}) · {time.time() - t0:.0f} s", flush=True)
             except Exception as e:  # noqa: BLE001
                 print(f"::warning::Övriga aktier kunde inte hämtas ({e}). Fortsätter med S&P 500.")
-                Ce = Ve = None
+                Ce = None
 
     if args.spara_data:
-        spara_data(args.spara_data, C, V, spy, medl, hist)
+        spara_data(args.spara_data, C, P, V, spy, medl, hist)
 
     # --- Träningsdata, test framåt i tiden och slutlig modell ---
-    D = Data(C, V, spy)
+    D = Data(C, P, V, spy)
     rader, sek_ix, sek_namn, mk = bygg(D, medl, hist)
     print(f"Träningsdata: {sum(len(r['ix']) for r in rader if r['klar'])} rader, {len(rader)} månader från {rader[0]['datum'].date()} · {time.time() - t0:.0f} s", flush=True)
     pred = walk_forward(rader)
@@ -761,20 +799,22 @@ def main():
     idag = D.dates[i]
     if Ce is not None and Ce.shape[1]:
         # Lägg till övriga aktier (2 års historik) bredvid indexets
-        Call = pd.concat([pd.DataFrame(D.Pb, index=D.dates, columns=D.tick).iloc[-520:], Ce.reindex(D.dates[-520:])], axis=1)
-        Vall = pd.concat([pd.DataFrame(D.Vol, index=D.dates, columns=D.tick).iloc[-520:], Ve.reindex(D.dates[-520:])], axis=1)
-        D2 = Data(Call, Vall, spy.reindex(D.dates).iloc[-520:])
+        sista = D.dates[-520:]
+        Call = pd.concat([C.reindex(sista), Ce.reindex(sista)], axis=1)
+        Pall = pd.concat([P.reindex(sista), Pe.reindex(sista)], axis=1)
+        Vall = pd.concat([V.reindex(sista), Ve.reindex(sista)], axis=1)
+        D2 = Data(Call, Pall, Vall, spy.reindex(D.dates).iloc[-520:])
         # Säsong kräver lång historik: ta den från hela datamängden för indexets aktier
         sas = np.concatenate([D.sasong(i), np.full(Ce.shape[1], np.nan)])
         D2.sasong = lambda _i, _s=sas: _s
         i2 = len(D2.dates) - 1
         sek2 = np.concatenate([sek_ix, np.full(Ce.shape[1], -1)])
         mm = np.array([t in medl for t in D2.tick])
-        X, mask, mask_alla = tvarsnitt(D2, i2, mm, sek2, extra_mask=~mm)
+        X, mask, mask_alla, _ = tvarsnitt(D2, i2, mm, sek2, extra_mask=~mm)
         tick = D2.tick
     else:
         mm = np.array([t in medl for t in D.tick])
-        X, mask, mask_alla = tvarsnitt(D, i, mm, sek_ix)
+        X, mask, mask_alla, _ = tvarsnitt(D, i, mm, sek_ix)
         tick = D.tick
     ix = np.flatnonzero(mask_alla)
     karna = mask[ix]

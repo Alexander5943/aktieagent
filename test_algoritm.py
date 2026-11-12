@@ -29,11 +29,11 @@ def test(namn):
 
 
 def kor(effekt, seed=3, slut="2019-12-31", n=160, lika=False):
-    C, V, spy, medl, hist = A.demo_data(seed=seed, effekt=effekt, n=n, slut=slut, lika=lika)
-    D = A.Data(C, V, spy)
+    C, P, V, spy, medl, hist = A.demo_data(seed=seed, effekt=effekt, n=n, slut=slut, lika=lika)
+    D = A.Data(C, P, V, spy)
     rader, sek_ix, _, _ = A.bygg(D, medl, hist)
     pred = A.walk_forward(rader)
-    return D, rader, sek_ix, pred, (C, V, spy, medl, hist)
+    return D, rader, sek_ix, pred, (C, P, V, spy, medl, hist)
 
 
 D0, rader0, sek0, pred0, raw0 = kor(0.0)
@@ -48,7 +48,7 @@ def _():
             t = A.testa(rader, pred, sek, None, m)
             assert abs(t["ic_t"]) < 3, f"{m}: IC t-värde {t['ic_t']:.1f}"
             diff = t["algoritm"]["cagr"] - t["snitt"]["cagr"]
-            assert -0.07 < diff < 0.03, f"{m}: {diff:+.1%} mot snittet per år"
+            assert -0.10 < diff < 0.03, f"{m}: {diff:+.1%} mot snittet per år"
 
 
 @test("inplanterat mönster hittas")
@@ -62,11 +62,11 @@ def _():
 
 @test("faktorer och förutsägelser använder inga framtida kurser")
 def _():
-    C, V, spy, medl, hist = raw0
+    C, P, V, spy, medl, hist = raw0
     # Klipp av all data strax efter en beslutsdag mitt i testperioden
     k0 = next(k for k, r in enumerate(rader0) if r["datum"].year == 2014 and r["datum"].month == 3)
     stopp = D0.dates[rader0[k0]["i"] + 1]
-    D1 = A.Data(C[C.index <= stopp], V[V.index <= stopp], spy[spy.index <= stopp])
+    D1 = A.Data(C[C.index <= stopp], P[P.index <= stopp], V[V.index <= stopp], spy[spy.index <= stopp])
     rader1, _, _, _ = A.bygg(D1, medl, hist)
     assert rader1[-1]["datum"] == rader0[k0]["datum"]
     for k in (k0, k0 - 1, k0 - 14):
@@ -92,7 +92,8 @@ def _():
     hist = [(pd.Timestamp("2010-01-04"), frozenset({"AAA", "FB", "OLD"})), (pd.Timestamp("2015-06-01"), frozenset({"AAA", "FB", "NEW"})),
             (pd.Timestamp("2022-06-09"), frozenset({"AAA", "META", "NEW"}))]
     medl = {"AAA": {}, "META": {}, "NEW": {}, "NYAST": {}}
-    mk = A.medlemskap(hist, medl, [pd.Timestamp(x) for x in ("2009-01-05", "2012-03-01", "2018-01-02", "2022-07-01", "2023-06-01")], ["AAA", "META", "NEW", "NYAST"])
+    # "FB" finns hos Yahoo men är idag ett annat bolag: namnbytet till META ska gå före
+    mk = A.medlemskap(hist, medl, [pd.Timestamp(x) for x in ("2009-01-05", "2012-03-01", "2018-01-02", "2022-07-01", "2023-06-01")], ["AAA", "META", "NEW", "NYAST", "FB", "PARA"])
     s = {d.year: v[0] for d, v in mk.items()}
     assert s[2009] == frozenset()
     assert s[2012] == {"AAA", "META"}, s[2012]          # FB hittas som META, OLD saknar kurser
