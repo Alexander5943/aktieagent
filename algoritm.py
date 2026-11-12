@@ -653,6 +653,21 @@ def uppdatera_portfolj(st: dict | None, datum: str, avk, index_avk, ordning: lis
 # ---------------------------------------------------------------------------
 # 6. Kör allt
 # ---------------------------------------------------------------------------
+def spara_data(fil, C, V, spy, medl, hist):
+    np.savez_compressed(fil, C=C.to_numpy(np.float32), V=V.reindex(index=C.index, columns=C.columns).to_numpy(np.float32), spy=spy.reindex(C.index).to_numpy(float),
+                        datum=C.index.strftime("%Y-%m-%d").to_numpy(), tick=np.array(C.columns), medl=json.dumps(medl, ensure_ascii=False),
+                        hist=json.dumps([[d.strftime("%Y-%m-%d"), sorted(ts)] for d, ts in hist]))
+
+
+def las_data(fil):
+    z = np.load(fil, allow_pickle=False)
+    idx = pd.to_datetime(z["datum"])
+    C = pd.DataFrame(z["C"].astype(float), index=idx, columns=list(z["tick"]))
+    V = pd.DataFrame(z["V"].astype(float), index=idx, columns=list(z["tick"]))
+    spy = pd.Series(z["spy"], index=idx).dropna()
+    return C, V, spy, json.loads(str(z["medl"])), [(pd.Timestamp(d), frozenset(ts)) for d, ts in json.loads(str(z["hist"]))]
+
+
 def las_krasch() -> pd.Series | None:
     try:
         with open(KRASCH, encoding="utf-8") as fh:
@@ -668,6 +683,8 @@ def main():
     a.add_argument("--demo", action="store_true")
     a.add_argument("--utan-ovriga", action="store_true", help="Räkna bara på S&P 500 (hoppa över övriga amerikanska aktier)")
     a.add_argument("--out", default=OUT)
+    a.add_argument("--spara-data", help="Spara kursdatan i en fil (för felsökning och utveckling)")
+    a.add_argument("--data", help="Läs kursdata från en fil skapad med --spara-data i stället för från nätet")
     args = a.parse_args()
     t0 = time.time()
 
@@ -683,6 +700,9 @@ def main():
     # --- Data ---
     if args.demo:
         C, V, spy, medl, hist = demo_data(effekt=0.02)
+        Ce = Ve = None
+    elif args.data:
+        C, V, spy, medl, hist = las_data(args.data)
         Ce = Ve = None
     else:
         medl, hist = sp500_nu(), sp500_historik()
@@ -719,6 +739,9 @@ def main():
             except Exception as e:  # noqa: BLE001
                 print(f"::warning::Övriga aktier kunde inte hämtas ({e}). Fortsätter med S&P 500.")
                 Ce = Ve = None
+
+    if args.spara_data:
+        spara_data(args.spara_data, C, V, spy, medl, hist)
 
     # --- Träningsdata, test framåt i tiden och slutlig modell ---
     D = Data(C, V, spy)

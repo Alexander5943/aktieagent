@@ -12,6 +12,10 @@ on:
         description: "Spara resultatet i appen"
         type: boolean
         default: true
+      data:
+        description: "Spara kursdatan som fil (för utveckling)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -39,8 +43,16 @@ jobs:
       - name: Träna, testa och fatta beslut
         env:
           PYTHONIOENCODING: utf-8
-        run: python -u algoritm.py ${{ (github.event_name == 'workflow_dispatch' && !inputs.spara) && '--out /tmp/algoritm.json' || '' }}
+        run: python -u algoritm.py ${{ (github.event_name == 'workflow_dispatch' && !inputs.spara) && '--out /tmp/algoritm.json' || '' }} ${{ (github.event_name == 'workflow_dispatch' && inputs.data) && '--spara-data /tmp/kurser.npz --utan-ovriga' || '' }}
         timeout-minutes: 35
+
+      - name: Ladda upp kursdata
+        if: github.event_name == 'workflow_dispatch' && inputs.data
+        uses: actions/upload-artifact@v5
+        with:
+          name: kurser
+          path: /tmp/kurser.npz
+          retention-days: 3
 
       - name: Spara
         if: github.event_name != 'workflow_dispatch' || inputs.spara
