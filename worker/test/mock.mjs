@@ -56,10 +56,30 @@ function fakeSummary(t) {
   }] } };
 }
 
-function fakeTimeseries() {
-  const q = ["2024-09-30", "2024-12-31", "2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31", "2026-03-31", "2026-06-30"];
-  const ser = (name, base) => ({ meta: { type: [name] }, [name]: q.map((d, i) => ({ asOfDate: d, reportedValue: { raw: base * (1 + i * 0.12) } })) });
-  return { timeseries: { result: [ser("quarterlyTotalRevenue", 3e10), ser("quarterlyNetIncome", 1.6e10), ser("annualTotalRevenue", 1.3e11), ser("annualNetIncome", 7e10)] } };
+// Låtsasrapporter: ett lönsamt bolag som växer 20 % per år. "LOSS" går med förlust, "EURO" redovisar i euro.
+const BAS = { TotalRevenue: 100e9, CostOfRevenue: 40e9, GrossProfit: 60e9, OperatingIncome: 30e9, EBIT: 30e9, NetIncome: 24e9, DilutedEPS: 2.4, DilutedAverageShares: 10e9,
+  SellingGeneralAndAdministration: 12e9, ResearchAndDevelopment: 15e9, OperatingCashFlow: 30e9, CapitalExpenditure: -5e9, FreeCashFlow: 25e9, DepreciationAndAmortization: 4e9,
+  StockBasedCompensation: 3e9, RepurchaseOfCapitalStock: -8e9, CashDividendsPaid: -1e9, TotalAssets: 150e9, CurrentAssets: 70e9, CurrentLiabilities: 25e9,
+  TotalLiabilitiesNetMinorityInterest: 50e9, StockholdersEquity: 100e9, RetainedEarnings: 60e9, TotalDebt: 12e9, LongTermDebt: 10e9,
+  CashCashEquivalentsAndShortTermInvestments: 40e9, AccountsReceivable: 15e9, Inventory: 8e9, NetPPE: 20e9, OrdinarySharesNumber: 10e9 };
+function fakeTimeseries(url) {
+  const u = new URL(url), t = decodeURIComponent(u.pathname.split("/").pop());
+  const typer = (u.searchParams.get("type") || "").split(",");
+  const kv = ["2024-09-30", "2024-12-31", "2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31", "2026-03-31", "2026-06-30"], ar = ["2022-12-31", "2023-12-31", "2024-12-31", "2025-12-31"];
+  const result = typer.map((typ) => {
+    const kvart = typ.startsWith("quarterly"), namn = typ.replace(/^(quarterly|annual)/, "");
+    // Äldre test: omsättning 3e10 och uppåt per kvartal
+    if (typ === "quarterlyTotalRevenue" && typer.length <= 4) return { meta: { type: [typ] }, [typ]: kv.map((d, i) => ({ asOfDate: d, reportedValue: { raw: 3e10 * (1 + i * 0.12) } })) };
+    if (typ === "quarterlyNetIncome" && typer.length <= 4) return { meta: { type: [typ] }, [typ]: kv.map((d, i) => ({ asOfDate: d, reportedValue: { raw: 1.6e10 * (1 + i * 0.12) } })) };
+    let bas = BAS[namn];
+    if (bas == null) return { meta: { type: [typ] } };
+    if (t === "LOSS" && ["OperatingIncome", "EBIT", "NetIncome", "DilutedEPS", "OperatingCashFlow", "FreeCashFlow"].includes(namn)) bas = -Math.abs(bas) / 3;
+    const fast = /Shares|OrdinaryShares/.test(namn);
+    const datum = kvart ? kv.slice(-5) : ar;
+    return { meta: { type: [typ] }, [typ]: datum.map((d, i) => ({ asOfDate: d, currencyCode: t === "EURO" ? "EUR" : "USD",
+      reportedValue: { raw: (fast ? bas : bas * 1.2 ** (kvart ? 3 + (i - 4) / 4 : i)) / (kvart && !fast && namn !== "DilutedEPS" ? 4 : kvart && namn === "DilutedEPS" ? 4 : 1) } })) };
+  });
+  return { timeseries: { result } };
 }
 
 const NAMES = { NVDA: "NVIDIA Corporation", AAPL: "Apple Inc.", MSFT: "Microsoft Corporation", TSLA: "Tesla, Inc.", MU: "Micron Technology, Inc." };
@@ -77,7 +97,7 @@ export function installMocks({ claudeMode = "ok" } = {}) {
       return ok(fakeChart(t, new URL(url).searchParams.get("range"), new URL(url).searchParams.get("interval")));
     }
     if (url.includes("/v10/finance/quoteSummary/")) return ok(fakeSummary(decodeURIComponent(url.split("quoteSummary/")[1].split("?")[0])));
-    if (url.includes("fundamentals-timeseries")) return ok(fakeTimeseries());
+    if (url.includes("fundamentals-timeseries")) return ok(fakeTimeseries(url));
     if (url.includes("/v1/finance/search")) {
       const q = new URL(url).searchParams.get("q").toUpperCase();
       if (new URL(url).searchParams.get("newsCount") === "8")

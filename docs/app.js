@@ -638,7 +638,7 @@
     $("#topaction").innerHTML = starBtn();
 
     const metric = (label, val) => `<div><span>${label}</span><b>${val}</b></div>`;
-    const sections = [["sec-chart", "Graf"], ["sec-algo", "Algoritm"], ["sec-ai", "AI"], ["sec-avk", "Avkastning"], ["sec-varde", "Värdering"], ["sec-agare", "Ägare"], ["sec-bolag", "Bolaget"], ["sec-risk", "Risk"], ["sec-sasong", "Säsong"], ["sec-makro", "Makro"], ["sec-tal", "Nyckeltal"]];
+    const sections = [["sec-chart", "Graf"], ["sec-algo", "Algoritm"], ["sec-ai", "AI"], ["sec-avk", "Avkastning"], ["sec-varde", "Värdering"], ["sec-djup", "Rapporter"], ["sec-agare", "Ägare"], ["sec-bolag", "Bolaget"], ["sec-risk", "Risk"], ["sec-sasong", "Säsong"], ["sec-makro", "Makro"], ["sec-tal", "Nyckeltal"]];
     view.innerHTML = `
       <div class="hero">
         <div class="name">${esc(s.namn)} · ${esc(t)}${s.börs ? " · " + esc(s.börs) : ""}</div>
@@ -653,7 +653,7 @@
         return [adv ? chip("Råd", adv.råd, RÅD_CLS[adv.råd], "sec-varde") : "", v ? chip("Värdering", v.läge.replace("Kraftigt ", "Mycket "), lägeCls(v.läge), "sec-varde") : "",
           s.risk ? chip("Risk", `${s.risk.nivå}/10`, riskCls(s.risk.nivå), "sec-risk") : "",
           b ? chip("Ägarbetyg", b.betyg, { Bra: "buy", Neutral: "neutral", Dålig: "avoid" }[b.betyg], "sec-agare") : "",
-          `<span id="qalgo"></span>`, `<span id="qai"></span>`].join("");
+          `<span id="qdjup"></span>`, `<span id="qalgo"></span>`, `<span id="qai"></span>`].join("");
       })()}</div>
       <nav class="jump" id="jump" aria-label="Hoppa till">${sections.map(([id, l]) => `<button data-sec="${id}">${l}</button>`).join("")}</nav>
       <div class="card" style="padding-top:8px" id="sec-chart">
@@ -665,6 +665,7 @@
       <div id="sec-ai"><div id="aiwrap">${aiLoading("Hämtar AI-analys…")}</div></div>
       ${hzCard(s)}
       ${valCard(s)}
+      <div id="sec-djup"><div id="djupwrap"><div class="card"><h2>Rapporter och djupanalys</h2><div class="skeleton" style="height:120px"></div></div></div></div>
       ${ownerCard(s)}
       ${bolagCard(s)}
       ${riskCard(s)}
@@ -699,6 +700,11 @@
       const a = algoFor(ad, t);
       if (a && $("#qalgo")) $("#qalgo").outerHTML = `<button class="qchip" data-sec="sec-algo"><span>Algoritm</span><b class="pill ${a.cls}">${a.rad}</b></button>`;
     }).catch(() => {});
+    api("/api/djup?t=" + encodeURIComponent(t)).then((d) => {
+      if (gone() || !$("#djupwrap")) return;
+      $("#djupwrap").innerHTML = djupCards(d, s);
+      if (d && d.hälsa && $("#qdjup")) $("#qdjup").outerHTML = `<button class="qchip" data-sec="sec-djup"><span>Hälsa</span><b class="pill ${{ Stark: "buy", Okej: "hold", Svag: "avoid" }[d.hälsa.betyg]}">${d.hälsa.betyg}</b></button>`;
+    }).catch(() => { if (!gone() && $("#djupwrap")) $("#djupwrap").innerHTML = `<div class="card"><h2>Rapporter och djupanalys</h2><p class="small muted">Kunde inte hämta rapporterna just nu.</p></div>`; });
     $("#quick").onclick = (e) => { const b = e.target.closest("button[data-sec]"); const el = b && document.getElementById(b.dataset.sec); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
     $("#jump").onclick = (e) => { const b = e.target.closest("button"); const el = b && document.getElementById(b.dataset.sec); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
 
@@ -1038,6 +1044,98 @@
   const manad = (iso) => `${["januari", "februari", "mars", "april", "maj", "juni", "juli", "augusti", "september", "oktober", "november", "december"][+iso.slice(5, 7) - 1]} ${iso.slice(0, 4)}`;
 
   // Kort på aktiesidan
+  // ---------- Rapporter och djupanalys (ren matematik, ingen AI) ----------
+  function djupCards(d, s) {
+    if (!d || d.saknas || !d.tabell || !d.tabell.length) return `<div class="card" id="djup"><h2>Rapporter och djupanalys</h2><p class="small muted">Yahoo Finance har inga årsrapporter för den här aktien.</p></div>`;
+    const val = esc(s.valuta || ""), kr = (x) => (x == null ? "–" : num(x, Math.abs(x) >= 100 ? 0 : 2));
+    const v = d.värde, H = d.hälsa, F = d.styrka, Z = d.obestånd, M = d.bokföring, K = d.kvalitet, G = d.tillväxt;
+    const hCls = { Stark: "buy", Okej: "hold", Svag: "avoid" }[H.betyg];
+    const ar = (x) => esc(String(x.d).slice(0, 4));
+
+    // --- Kort 1: vad är bolaget värt? ---
+    let värde;
+    if (!v) värde = "";
+    else if (v.saknas) värde = `<div class="card"><h2>Vad är bolaget värt?</h2><p class="small muted">${esc(v.saknas)}</p></div>`;
+    else {
+      const A = v.antaganden, h = v.hist, n = h.antal.length, max = Math.max(...h.antal), W = 240, Hh = 64, bw = W / n;
+      const x = (p) => ((p - h.från) / (h.till - h.från || 1)) * W;
+      const px = Math.max(1, Math.min(W - 1, x(s.pris))), utanför = s.pris < h.från ? "under" : s.pris > h.till ? "över" : "";
+      const staplar = h.antal.map((c, i) => { const mitt = h.från + ((i + 0.5) / n) * (h.till - h.från); const hh = max ? (c / max) * (Hh - 4) : 0;
+        return `<rect x="${(i * bw + 0.6).toFixed(1)}" y="${(Hh - hh).toFixed(1)}" width="${(bw - 1.2).toFixed(1)}" height="${hh.toFixed(1)}" rx="1.5" class="${mitt > s.pris ? "hi" : "lo"}"/>`; }).join("");
+      const skill = v.median / s.pris - 1, sn = v.sannolikhet;
+      const dom = sn >= 0.7 ? ["Ser billig ut", "buy"] : sn >= 0.45 ? ["Ungefär rätt prissatt", "hold"] : sn >= 0.2 ? ["Ser dyr ut", "hold"] : ["Ser mycket dyr ut", "avoid"];
+      const kg = v.kräver, kräver = !kg ? "" : kg.över ? `Dagens kurs kräver att kassaflödet växer med <b>mer än ${pct(kg.g, 0, false)} per år</b> till en början. Det är mycket ovanligt.`
+        : kg.under ? "Dagens kurs går ihop även om kassaflödet krymper." : `Dagens kurs kräver att kassaflödet växer med <b>${pct(kg.g, 0, false)} per år</b> till en början. Räkningen antar ${pct(A.tillväxt, 0, false)}.`;
+      const kä = v.känslighet;
+      värde = `<div class="card"><h2>Vad är bolaget värt?</h2>
+        <div class="ahead"><span class="pill ${dom[1]}">${dom[0]}</span><span class="apo"><b>${pct(sn, 0, false)}</b> chans att värdet är över kursen</span></div>
+        <div class="atiles"><div><span class="tiny muted">Beräknat värde</span><b>${kr(v.median)}</b><span class="tiny muted">${val} per aktie</span></div>
+          <div><span class="tiny muted">Kurs nu</span><b>${kr(s.pris)}</b><span class="tiny ${cls(skill)}">värdet är ${pct(skill, 0)} mot kursen</span></div></div>
+        <svg class="dhist" viewBox="0 0 ${W} ${Hh + 2}" preserveAspectRatio="none" role="img" aria-label="Fördelning av beräknat värde per aktie">${staplar}
+          <line x1="${px.toFixed(1)}" x2="${px.toFixed(1)}" y1="0" y2="${Hh}" class="pris"/></svg>
+        <div class="tiny muted ascale"><span>${kr(h.från)}</span><span>${utanför ? `kursen ligger ${utanför} hela skalan` : "strecket = kursen nu"}</span><span>${kr(h.till)}</span></div>
+        <p class="small" style="margin:10px 0 4px">Datorn har räknat ${num(v.antal, 0)} möjliga framtider. I 8 av 10 hamnar värdet mellan <b>${kr(v.p10)}</b> och <b>${kr(v.p90)}</b> ${val}.</p>
+        ${kräver ? `<p class="small" style="margin:4px 0">${kräver}</p>` : ""}
+        <details><summary>Så räknas värdet</summary>
+          <p class="small">Värdet är alla pengar bolaget väntas tjäna åt ägarna i framtiden, omräknade till dagens pengar (diskonterat kassaflöde). Tillväxten bromsar steg för steg under ${10} år. Varje simulering slumpar tillväxt och avkastningskrav.</p>
+          <div class="kv"><span>Kassaflöde till ägarna (12 mån)</span><b>${big(A.kassaflöde)}</b></div>
+          <div class="kv"><span>Tillväxt första året</span><b>${pct(A.tillväxt, 0, false)} ± ${num(A.tillväxt_osäkerhet * 100, 0)}</b></div>
+          <div class="kv"><span>Avkastningskrav</span><b>${pct(A.krav, 1, false)}</b></div>
+          <div class="kv"><span>– varav ränta (USA 10 år)</span><b>${pct(A.ränta, 1, false)}</b></div>
+          <div class="kv"><span>– varav risk (beta ${num(A.beta, 2)})</span><b>${pct(A.krav - A.ränta, 1, false)}</b></div>
+          <div class="kv"><span>Evig tillväxt efter 10 år</span><b>${pct(A.evig_tillväxt, 1, false)}</b></div>
+          <div class="kv"><span>Kassa minus lån</span><b>${big(A.nettokassa)}</b></div>
+          <p class="small" style="margin-top:10px"><b>Vad händer om antagandena ändras?</b> Värde per aktie:</p>
+          <table class="ktab dsens"><tr><th>Tillväxt ↓ / Krav →</th>${kä.krav.map((r) => `<th>${pct(r, 1, false)}</th>`).join("")}</tr>
+            ${kä.tillväxt.map((g, i) => `<tr><th>${pct(g, 0, false)}</th>${kä.värde[i].map((x) => `<td class="${x > s.pris ? "up" : "down"}">${kr(x)}</td>`).join("")}</tr>`).join("")}</table>
+          <p class="tiny muted">Grönt = över dagens kurs. Kassaflödet är fritt kassaflöde minus löner som betalas i aktier.</p>
+        </details>
+        <p class="tiny muted">En beräkning, inte ett facit. Små ändringar i antagandena ger stora ändringar i värdet. Snabbväxande bolag ser ofta dyra ut här.</p></div>`;
+    }
+
+    // --- Kort 2: finansiell hälsa ---
+    const zPos = Z ? Math.max(2, Math.min(98, (Z.z / 6) * 100)) : null;
+    const hälsa = `<div class="card"><h2>Finansiell hälsa</h2>
+      <div class="ahead"><span class="pill ${hCls}">${H.betyg}</span><span class="apo">från årsrapporten ${ar({ d: d.senaste_år })}</span></div>
+      ${H.plus.map((x) => `<div class="dpunkt"><i class="ok">✓</i>${esc(x)}</div>`).join("")}${H.minus.map((x) => `<div class="dpunkt"><i class="nej">✕</i>${esc(x)}</div>`).join("")}
+      ${F ? `<details><summary>Styrka: ${F.poäng} av ${F.av} test klarade</summary>
+        <p class="small muted">Piotroskis F-score. Nio ja/nej-frågor om lönsamhet, skulder och effektivitet.</p>
+        ${F.test.map((x) => `<div class="dpunkt" data-tip="${esc(x.text)}"><i class="${x.ok == null ? "" : x.ok ? "ok" : "nej"}">${x.ok == null ? "–" : x.ok ? "✓" : "✕"}</i><span>${esc(x.namn)}<small>${esc(x.text)}</small></span></div>`).join("")}</details>` : ""}
+      ${Z ? `<details><summary>Risk för konkurs: ${{ trygg: "låg", gråzon: "gråzon", risk: "förhöjd" }[Z.nivå]} (Z ${num(Z.z, 1)})</summary>
+        <div class="ameter dz"><b style="left:${zPos}%"></b></div>
+        <div class="tiny muted ascale"><span>risk (under 1,8)</span><span>gråzon</span><span>trygg (över 3)</span></div>
+        <p class="small muted">Altmans Z-score väger ihop fem tal: rörelsekapital, sparad vinst, rörelseresultat, börsvärde mot skulder och försäljning. ${Z.z > 12 ? "Mycket högt värde beror ofta på högt börsvärde och små skulder." : ""}</p></details>` : d.finans ? `<p class="tiny muted">Konkursrisk och bokföringstest räknas inte för banker och fastighetsbolag. Deras balansräkningar fungerar annorlunda.</p>` : ""}
+      ${M ? `<details><summary>Bokföringen: ${M.flagga ? "varningstecken" : "inga varningstecken"} (M ${num(M.m, 2)})</summary>
+        <p class="small muted">Beneishs M-score letar efter mönster som är vanliga när vinsten har putsats: kundfordringar som växer snabbare än försäljningen, vinst som inte blir pengar, sjunkande marginaler. Över −1,78 är en varning. ${M.flagga ? "En varning är inget bevis – snabb tillväxt och uppköp kan också ge utslag." : ""}</p></details>` : ""}
+      ${K ? `<div class="kv" style="margin-top:6px"><span>Pengar in per krona vinst</span><b>${K.kassa_per_vinstkrona == null ? "–" : num(K.kassa_per_vinstkrona, 2) + " kr"}</b></div>
+        ${K.sbc_andel != null ? `<div class="kv"><span>Löner i aktier, andel av försäljningen</span><b>${pct(K.sbc_andel, 1, false)}</b></div>` : ""}` : ""}
+      ${d.aktier && d.aktier.förändring_per_år != null ? `<div class="kv"><span>Antal aktier per år</span><b class="${d.aktier.förändring_per_år <= 0 ? "up" : "down"}">${pct(d.aktier.förändring_per_år, 1)}${d.aktier.förändring_per_år <= -0.005 ? " (återköp)" : d.aktier.förändring_per_år >= 0.005 ? " (utspädning)" : ""}</b></div>` : ""}
+    </div>`;
+
+    // --- Kort 3: rapporterna år för år ---
+    const T = d.tabell, rad = (namn, f, c) => `<tr><th>${namn}</th>${T.map((y) => `<td${c ? ` class="${c(y)}"` : ""}>${f(y)}</td>`).join("")}</tr>`;
+    const tv = (namn, g) => !g ? "" : `<div class="kv"><span>${namn}</span><b>${pct(g.per_år, 0)} per år <small class="muted">(${pct(g.låg, 0)} till ${pct(g.hög, 0)})</small></b></div>`;
+    const D = d.dupont || [];
+    const rapporter = `<div class="card"><h2>Rapporterna år för år</h2>
+      <div class="dscroll"><table class="ktab drap"><tr><th>${esc(d.valuta || "")}</th>${T.map((y) => `<th>${ar(y)}</th>`).join("")}</tr>
+        ${rad("Omsättning", (y) => big(y.oms))}${rad("Rörelseresultat", (y) => big(y.ror), (y) => cls(y.ror))}${rad("Vinst", (y) => big(y.res), (y) => cls(y.res))}
+        ${rad("Fritt kassaflöde", (y) => big(y.fcf), (y) => cls(y.fcf))}${rad("Vinst per aktie", (y) => num(y.eps, 2))}
+        ${rad("Bruttomarginal", (y) => pct(y.bruttomarginal, 0, false))}${rad("Rörelsemarginal", (y) => pct(y.rörelsemarginal, 0, false))}${rad("Vinstmarginal", (y) => pct(y.vinstmarginal, 0, false))}</table></div>
+      <h3 class="dh3">Tillväxt</h3>
+      ${tv("Omsättning", G.omsättning)}${tv("Vinst", G.vinst)}${tv("Fritt kassaflöde", G.kassaflöde)}
+      ${G.senaste_kvartal != null ? `<div class="kv"><span>Senaste kvartalet mot året före</span><b class="${cls(G.senaste_kvartal)}">${pct(G.senaste_kvartal, 0)}</b></div>` : ""}
+      ${G.omsättning || G.vinst || G.kassaflöde ? `<p class="tiny muted">Trendlinje genom alla år. Parentesen är felmarginalen: jämn tillväxt ger smalt spann, ryckig ger brett.${!G.vinst && T.some((y) => y.res < 0) ? " Vinsttrend går inte att räkna när något år är förlust." : ""}</p>` : `<p class="tiny muted">För få år, eller förlustår, för att räkna en trend.</p>`}
+      ${D.length ? `<details><summary>Varför tjänar bolaget pengar? (DuPont)</summary>
+        <p class="small muted">Avkastning på eget kapital = marginal × hur hårt tillgångarna jobbar × belåning. Hög avkastning från marginal är starkare än hög avkastning från lån.</p>
+        <div class="dscroll"><table class="ktab drap"><tr><th></th>${D.map((y) => `<th>${ar(y)}</th>`).join("")}</tr>
+          <tr><th>Vinstmarginal</th>${D.map((y) => `<td>${pct(y.marginal, 0, false)}</td>`).join("")}</tr>
+          <tr><th>Försäljning per krona tillgångar</th>${D.map((y) => `<td>${num(y.omsättning, 2)}</td>`).join("")}</tr>
+          <tr><th>Belåning (tillgångar / eget kapital)</th>${D.map((y) => `<td>${num(y.belåning, 1)}</td>`).join("")}</tr>
+          <tr><th>= Avkastning på eget kapital</th>${D.map((y) => `<td><b>${pct(y.roe, 0, false)}</b></td>`).join("")}</tr></table></div></details>` : ""}
+      <p class="tiny muted">Källa: bolagets årsrapporter via Yahoo Finance. Ren matematik, ingen AI – kostar inget.</p></div>`;
+    return `<div id="djup">${värde}${hälsa}${rapporter}</div>`;
+  }
+
   function algoCard(d, t, owned) {
     const a = algoFor(d, t), R = d.regler, T = d.test;
     if (!a) return `<div class="card" id="algo"><h2>Algoritmen</h2><p class="small muted">Algoritmen har ingen poäng för den här aktien. Den räknar bara på amerikanska aktier med minst ett års historik och tillräckligt stor handel.</p></div>`;

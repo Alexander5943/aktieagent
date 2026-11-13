@@ -321,5 +321,123 @@ await test("inställning för daglig AI-genomgång", async () => {
   assert.equal((await (await call(env, "/api/portfolio/settings")).json()).dagligAI, true);
 });
 
+
+// ---------- Djupanalys av rapporterna ----------
+const R = await import("../src/rapport.js");
+const nara = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) <= tol, `${a} != ${b}`);
+
+await test("tillväxt: exakt serie ger exakt svar, ojämn serie ger felmarginal", () => {
+  const g = R.tillvaxt([100, 120, 144, 172.8]);
+  nara(g.per_år, 0.2, 1e-9); nara(g.låg, 0.2, 1e-6); nara(g.hög, 0.2, 1e-6); nara(g.r2, 1, 1e-9);
+  const o = R.tillvaxt([100, 150, 110, 190]);
+  assert.ok(o.låg < o.per_år && o.per_år < o.hög && o.hög - o.låg > 0.2, "ojämn tillväxt ska ge brett intervall");
+  assert.equal(R.tillvaxt([100, 120]), null, "två år räcker inte");
+  assert.equal(R.tillvaxt([100, -5, 120]), null, "förlustår går inte att logaritmera");
+});
+
+await test("DuPont: delarna gånger varandra är avkastningen på eget kapital", () => {
+  const d = R.dupont({ d: "2025-12-31", res: 24, oms: 100, tillg: 150, ek: 100 });
+  nara(d.marginal * d.omsättning * d.belåning, 0.24); nara(d.roe, 24 / 100);
+  assert.equal(R.dupont({ res: 1, oms: 10, tillg: 20, ek: -5 }), null, "negativt eget kapital");
+});
+
+await test("Piotroski F-score: starkt bolag får 9, svagt får lågt", () => {
+  const y0 = { d: "2024-12-31", res: 10, cfo: 12, tillg: 100, langa: 20, oms_tillg: 30, kort_skuld: 20, antal: 100, brutto: 40, oms: 100 };
+  const bra = { d: "2025-12-31", res: 15, cfo: 20, tillg: 105, langa: 15, oms_tillg: 40, kort_skuld: 20, antal: 99, brutto: 50, oms: 120 };
+  const dalig = { d: "2025-12-31", res: -5, cfo: -8, tillg: 110, langa: 40, oms_tillg: 20, kort_skuld: 25, antal: 130, brutto: 30, oms: 90 };
+  assert.equal(R.piotroski(bra, y0).poäng, 9); assert.equal(R.piotroski(bra, y0).nivå, "stark");
+  const f = R.piotroski(dalig, y0);
+  assert.equal(f.poäng, 0); assert.equal(f.nivå, "svag");
+  assert.equal(R.piotroski({ d: "2025-12-31", res: 1 }, y0), null, "för lite data");
+});
+
+await test("Altman Z-score: känt räkneexempel, zoner, hoppar över banker", () => {
+  const y = { oms_tillg: 60, kort_skuld: 20, tillg: 200, balanserat: 50, ebit: 30, skulder: 100, oms: 240 };
+  const z = R.altman(y, 300, "Technology");
+  nara(z.z, 1.2 * 0.2 + 1.4 * 0.25 + 3.3 * 0.15 + 0.6 * 3 + 1.0 * 1.2); assert.equal(z.nivå, "trygg");
+  assert.equal(R.altman({ ...y, ebit: -40, balanserat: -150, oms: 40 }, 20, "Industrials").nivå, "risk");
+  assert.equal(R.altman(y, 300, "Financial Services"), null);
+});
+
+await test("Beneish M-score: oförändrat bolag flaggas inte, uppblåsta kundfordringar och vinst utan pengar flaggas", () => {
+  const y0 = { oms: 100, kundf: 10, brutto: 40, oms_tillg: 40, ppe: 30, tillg: 100, avskr: 5, sga: 15, langa: 20, kort_skuld: 15, res: 10, cfo: 12 };
+  const lugn = R.beneish({ ...y0 }, y0, "Technology");
+  nara(lugn.m, -4.84 + 0.92 + 0.528 + 0.404 + 0.892 + 0.115 - 0.172 + 4.679 * (-0.02) - 0.327, 1e-9);
+  assert.equal(lugn.flagga, false);
+  const fusk = R.beneish({ ...y0, oms: 160, kundf: 45, res: 30, cfo: 2, brutto: 55 }, y0, "Technology");
+  assert.equal(fusk.flagga, true);
+  assert.equal(R.beneish(y0, y0, "Financial Services"), null);
+});
+
+await test("kassaflödesvärdering: utan osäkerhet lika med formeln, mer tillväxt ger högre värde", () => {
+  // Ingen tillväxt alls: värdet är en evig ström = kassaflöde / avkastningskrav
+  nara(R.nuvarde(100, 0, 0.1, 0), 1000, 1e-6);
+  assert.ok(R.nuvarde(100, 0.15, 0.09, 0.025) > R.nuvarde(100, 0.05, 0.09, 0.025));
+  assert.ok(R.nuvarde(100, 0.1, 0.08, 0.025) > R.nuvarde(100, 0.1, 0.11, 0.025), "högre krav ger lägre värde");
+  const fast = R.dcf({ fcf0: 100, g: 0.08, sg: 0, r: 0.09, sr: 0, sgT: 0, nettokassa: 50, aktier: 10, pris: 100 });
+  const facit = (R.nuvarde(100, 0.08, 0.09, 0.025) + 50) / 10;
+  nara(fast.median, facit, 1e-6); nara(fast.p10, facit, 1e-6); nara(fast.p90, facit, 1e-6); nara(fast.mitt, facit, 1e-9);
+  nara(fast.känslighet.värde[1][1], facit, 1e-9);
+});
+
+await test("simuleringen: spridning, sannolikhet mot kursen, samma svar varje gång", () => {
+  const i = { fcf0: 100, g: 0.1, sg: 0.05, r: 0.09, sr: 0.01, nettokassa: 0, aktier: 10, seed: "TEST" };
+  const a = R.dcf({ ...i, pris: 200 }), b = R.dcf({ ...i, pris: 200 });
+  assert.deepEqual(a, b, "samma indata ska ge samma svar");
+  assert.ok(a.p10 < a.p25 && a.p25 < a.median && a.median < a.p75 && a.p75 < a.p90);
+  assert.equal(a.hist.antal.length, 24); assert.ok(a.hist.antal.reduce((x, y) => x + y, 0) > 3700);
+  assert.ok(Math.abs(a.median / a.mitt - 1) < 0.08, "medianen ligger nära räkningen utan osäkerhet");
+  assert.equal(R.dcf({ ...i, pris: 1 }).sannolikhet, 1); assert.equal(R.dcf({ ...i, pris: 1e6 }).sannolikhet, 0);
+  nara(R.dcf({ ...i, pris: a.median }).sannolikhet, 0.5, 0.01);
+  assert.ok(R.dcf({ ...i, pris: 150 }).sannolikhet > R.dcf({ ...i, pris: 250 }).sannolikhet);
+  assert.equal(R.dcf({ ...i, fcf0: -5, pris: 10 }), null, "negativt kassaflöde går inte att värdera så");
+  // Normalfördelade slumptal: ungefär 10 % ska ligga under −1,28 standardavvikelser
+  const s = R.dcf({ fcf0: 100, g: 0.1, sg: 0.05, r: 0.09, sr: 0, sgT: 0, aktier: 10, pris: 1, seed: "N" });
+  const under = (R.nuvarde(100, 0.1 - 1.2816 * 0.05, 0.09, 0.025)) / 10;
+  assert.ok(Math.abs(s.p10 / under - 1) < 0.03, `p10 ${s.p10} mot ${under}`);
+});
+
+await test("omvänd värdering: tillväxten som kursen kräver ger tillbaka kursen", () => {
+  const k = R.omvandDcf(100, 0.09, 0.025, 50, 10, 300);
+  nara((R.nuvarde(100, k.g, 0.09, 0.025) + 50) / 10, 300, 1e-6);
+  assert.ok(R.omvandDcf(100, 0.09, 0.025, 0, 10, 600).g > k.g, "högre kurs kräver mer tillväxt");
+  assert.equal(R.omvandDcf(100, 0.09, 0.025, 0, 10, 1e9).över, true);
+  assert.equal(R.omvandDcf(-1, 0.09, 0.025, 0, 10, 100), null);
+});
+
+await test("djupanalys från servern: tabell, tillväxt, styrka, värde – och ingen AI", async () => {
+  installMocks();
+  const env = makeEnv();
+  const innan = calls.filter((u) => u.includes("anthropic")).length;
+  const r = await call(env, "/api/djup?t=NVDA");
+  assert.equal(r.status, 200);
+  const d = await r.json();
+  assert.equal(d.tabell.length, 4); nara(d.tabell.at(-1).bruttomarginal, 0.6, 1e-9);
+  nara(d.tillväxt.omsättning.per_år, 0.2, 1e-6); assert.ok(d.tillväxt.senaste_kvartal > 0.15);
+  assert.ok(d.styrka.poäng >= 4 && d.styrka.test.length === 9);
+  assert.equal(d.obestånd.nivå, "trygg"); assert.equal(d.bokföring.flagga, false);
+  assert.equal(d.dupont.length, 4); nara(d.dupont[0].roe, 24 / 100, 1e-9);
+  const v = d.värde;
+  assert.ok(v.median > 0 && v.p10 < v.median && v.median < v.p90 && v.sannolikhet >= 0 && v.sannolikhet <= 1);
+  assert.ok(v.antaganden.krav > 0.065 && v.antaganden.krav < 0.14 && v.antaganden.tillväxt <= 0.3);
+  assert.ok(v.antaganden.kassaflöde < d.tolv.fcf, "aktielöner dras från kassaflödet");
+  nara((R.nuvarde(v.antaganden.kassaflöde, v.kräver.g, v.antaganden.krav, 0.025) + v.antaganden.nettokassa) / v.antaganden.aktier, d.pris, 1e-3);
+  assert.equal(calls.filter((u) => u.includes("anthropic")).length, innan, "djupanalysen får inte kosta krediter");
+  const n = calls.length;
+  await call(env, "/api/djup?t=NVDA");
+  assert.equal(calls.length, n, "andra gången kommer svaret ur minnet");
+});
+
+await test("djupanalys: förlustbolag och bolag som redovisar i annan valuta får förklaring i stället för värde", async () => {
+  installMocks();
+  const env = makeEnv();
+  const f = await (await call(env, "/api/djup?t=LOSS")).json();
+  assert.ok(f.värde.saknas.includes("negativt kassaflöde") && f.värde.median === undefined);
+  assert.ok(f.styrka && f.styrka.nivå !== "stark"); assert.equal(f.tillväxt.vinst, null);
+  const e = await (await call(env, "/api/djup?t=EURO")).json();
+  assert.ok(e.värde.saknas.includes("EUR")); assert.equal(e.obestånd, null); assert.equal(e.samma_valuta, false);
+  assert.ok(e.styrka, "kvoter fungerar oavsett valuta");
+});
+
 console.log(failed ? `\n${failed} test misslyckades` : "\nAlla test gick igenom");
 process.exit(failed ? 1 : 0);

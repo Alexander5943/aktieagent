@@ -14,6 +14,7 @@
  */
 
 import { horizons, valuation, hype, seasonality, macro, ownership, risk, FACTORS } from "./analys.js";
+import { parseSeries, djupanalys, TYPER } from "./rapport.js";
 
 const MODEL = "claude-opus-5-5";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
@@ -44,6 +45,7 @@ export default {
       if (p === "/api/search") return json(await search(url.searchParams.get("q") || "", ctx));
       if (p === "/api/quotes") return json(await quotes((url.searchParams.get("symbols") || "").split(","), ctx));
       if (p === "/api/stock") return json(await stock(ticker(url), env, ctx));
+      if (p === "/api/djup") return json(await deep(ticker(url), env, ctx));
       if (p === "/api/ai" && req.method === "GET") return json(await getAI(ticker(url), env));
       if (p === "/api/ai" && req.method === "POST") return json(await runAI(ticker(url), env, ctx, url.searchParams.get("force") === "1"));
       if (p === "/api/watchlist" && req.method === "GET") return json(await getWatchlist(env));
@@ -357,6 +359,19 @@ async function stock(t, env, ctx) {
       makro: safe(() => macro(ch.rows, ms)),
       rapporter: fin, nyheter: nw, hämtad: Date.now(),
     };
+  });
+}
+
+// Djupanalys av bolagets rapporter: resultat-, balans- och kassaflödesräkning för de senaste åren (Yahoo Finance).
+// Ingen AI – bara matematik (se rapport.js). Sparas i 6 timmar.
+async function deep(t, env, ctx) {
+  return cached("djup1:" + t, 6 * 3600, ctx, async () => {
+    const now = Math.floor(Date.now() / 1000), from = now - 7 * 365 * 86400;
+    const url = `https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(t)}?type=${TYPER.join(",")}&period1=${from}&period2=${now}`;
+    const [s, d, ms] = await Promise.all([stock(t, env, ctx), yget(url).catch(() => null), macroSeries(ctx).catch(() => ({}))]);
+    if (!d) return { t, saknas: true };
+    const tnx = (ms["^TNX"] || []).at(-1);
+    return { t, pris: s.pris, ...djupanalys(parseSeries(d), s.nyckeltal, s.pris, tnx ? tnx.c / 100 : null, t), hämtad: Date.now() };
   });
 }
 
@@ -702,4 +717,4 @@ async function portfolioAdvice(body, env) {
 }
 
 // Exporteras för tester
-export const _test = { fundamentals, technicals, score, expectedReturn, editWatchlist, runAI, stock, search, macroSeries, portfolioKey };
+export const _test = { deep, fundamentals, technicals, score, expectedReturn, editWatchlist, runAI, stock, search, macroSeries, portfolioKey };

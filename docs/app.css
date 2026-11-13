@@ -347,3 +347,18 @@ ul.pm.plus li span{color:var(--up)} ul.pm.minus li span{color:var(--down)}
 .alist{margin:6px 0;padding-left:20px} .alist li{margin:7px 0}
 .afak{display:flex;justify-content:space-between;gap:8px;padding:4px 0}
 #apfchart{margin:6px 0}
+
+/* Rapporter och djupanalys */
+.dhist{display:block;width:100%;height:72px;margin-top:12px}
+.dhist rect.hi{fill:var(--buy);opacity:.75} .dhist rect.lo{fill:var(--muted);opacity:.35}
+.dhist .pris{stroke:var(--text);stroke-width:2;vector-effect:non-scaling-stroke}
+.dpunkt{display:flex;gap:8px;align-items:flex-start;padding:5px 0;font-size:14px}
+.dpunkt i{flex:none;width:18px;height:18px;border-radius:9px;font-style:normal;font-size:11px;font-weight:700;line-height:18px;text-align:center;background:var(--soft);color:var(--muted);margin-top:1px}
+.dpunkt i.ok{background:var(--buy);color:#fff} .dpunkt i.nej{background:var(--avoid);color:#fff}
+.dpunkt small{display:block;color:var(--muted);font-size:12px}
+.ameter.dz{background:linear-gradient(90deg,var(--avoid) 0 30%,var(--hold) 30% 50%,var(--buy) 50% 100%)}
+.dscroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -4px}
+.drap{font-size:13px;white-space:nowrap} .drap td,.drap th:not(:first-child){text-align:right}
+.drap tr th:first-child{position:sticky;left:0;background:var(--card);font-weight:500;color:var(--text);white-space:normal;min-width:104px}
+.dsens td,.dsens th{text-align:center}
+.dh3{font-size:14px;margin:14px 0 2px}
