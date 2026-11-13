@@ -48,7 +48,7 @@ jobs:
           try:
               dj = json.load(urllib.request.urlopen(urllib.request.Request(f"{url}/api/djup?t={os.environ['T']}", headers={"X-App-Key": os.environ["APP_KEY"], "User-Agent": "aktieagent-kontroll"}), timeout=60))
               v = dj.get("värde") or {}
-              print("::notice title=Djupanalys::" + json.dumps({"år": [y["d"] for y in dj.get("tabell", [])], "senaste": (dj.get("tabell") or [None])[-1], "tolv": dj.get("tolv"), "valuta": dj.get("valuta"),
+              print("::notice title=Djupanalys::" + json.dumps({"år": [y["d"] for y in dj.get("tabell", [])], "senaste": (dj.get("tabell") or [None])[-1], "tolv": dj.get("tolv"), "valuta": dj.get("valuta"), "saknar": dj.get("saknar"),
                   "F": (dj.get("styrka") or {}).get("poäng"), "F_test": [x["ok"] for x in (dj.get("styrka") or {}).get("test", [])], "Z": dj.get("obestånd"), "M": dj.get("bokföring"), "kvalitet": dj.get("kvalitet"), "aktier": dj.get("aktier"),
                   "hälsa": dj.get("hälsa"), "tillväxt": dj.get("tillväxt"), "dupont": (dj.get("dupont") or [None])[-1]}, ensure_ascii=False)[:3500])
               print("::notice title=Djupanalys värde::" + json.dumps({k: v.get(k) for k in ("saknas", "median", "p10", "p90", "sannolikhet", "kräver", "antaganden")} | {"pris": dj.get("pris")}, ensure_ascii=False)[:1500])

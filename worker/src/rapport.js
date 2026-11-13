@@ -265,5 +265,6 @@ export function djupanalys(serier, f, pris, ranta, t = "") {
     styrka: F, obestånd: Z, bokföring: M, kvalitet, aktier, värde: varde,
     hälsa: { betyg: halsa, plus, minus },
     finans: FINANS.test(f.sektor || ""),
+    saknar: Object.keys(FALT).filter((k) => y1[k] == null).concat(ok(f.börsvärde) ? [] : ["börsvärde"]),
   };
 }
