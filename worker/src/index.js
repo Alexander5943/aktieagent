@@ -365,7 +365,7 @@ async function stock(t, env, ctx) {
 // Djupanalys av bolagets rapporter: resultat-, balans- och kassaflödesräkning för de senaste åren (Yahoo Finance).
 // Ingen AI – bara matematik (se rapport.js). Sparas i 6 timmar.
 async function deep(t, env, ctx) {
-  return cached("djup3:" + t, 6 * 3600, ctx, async () => {
+  return cached("djup4:" + t, 6 * 3600, ctx, async () => {
     const now = Math.floor(Date.now() / 1000), from = now - 7 * 365 * 86400;
     const url = `https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(t)}?type=${TYPER.join(",")}&period1=${from}&period2=${now}`;
     const [s, d, ms] = await Promise.all([stock(t, env, ctx), yget(url).catch(() => null), macroSeries(ctx).catch(() => ({}))]);

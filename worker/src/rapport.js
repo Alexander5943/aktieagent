@@ -24,7 +24,7 @@ export const FALT = {
   sbc: "StockBasedCompensation", aterkop: "RepurchaseOfCapitalStock", utd: "CashDividendsPaid",
   tillg: "TotalAssets", oms_tillg: "CurrentAssets", kort_skuld: "CurrentLiabilities", skulder: "TotalLiabilitiesNetMinorityInterest",
   ek: "StockholdersEquity", balanserat: "RetainedEarnings", lan: "TotalDebt", langa: "LongTermDebt",
-  kassa: "CashCashEquivalentsAndShortTermInvestments", kundf: "AccountsReceivable", lager: "Inventory", ppe: "NetPPE", antal: "OrdinarySharesNumber",
+  kassa: "CashCashEquivalentsAndShortTermInvestments", cfo2: "CashFlowFromContinuingOperatingActivities", kundf: "AccountsReceivable", lager: "Inventory", ppe: "NetPPE", antal: "OrdinarySharesNumber",
 };
 const KVARTAL = ["oms", "ror", "res", "eps", "cfo", "capex", "fcf", "sbc"];
 export const TYPER = [...Object.values(FALT).map((x) => "annual" + x), ...KVARTAL.map((k) => "quarterly" + FALT[k])];
@@ -208,6 +208,7 @@ export function djupanalys(serier, f, pris, ranta, t = "") {
   const ar = serier.år, kv = serier.kv, y1 = ar.at(-1), y0 = ar.at(-2);
   if (!y1) return { saknas: true };
   // Totala skulder saknas ibland hos Yahoo: då är de tillgångar minus eget kapital
+  for (const y of [...ar, ...kv]) if (y.cfo == null && y.cfo2 != null) y.cfo = y.cfo2;
   for (const y of ar) if (y.skulder == null && ok(y.tillg, y.ek)) y.skulder = y.tillg - y.ek;
   const sammaValuta = !serier.valuta || !f.valuta || serier.valuta === f.valuta;
   const sum4 = (k) => { const q = kv.slice(-4); return q.length === 4 && q.every((x) => ok(x[k])) ? q.reduce((a, x) => a + x[k], 0) : null; };
@@ -236,7 +237,9 @@ export function djupanalys(serier, f, pris, ranta, t = "") {
   const agar = ok(tolv.fcf) ? tolv.fcf - (tolv.sbc || 0) : null;               // kassaflöde efter att aktielöner räknats som kostnad
   const antal = y1.aktier ?? y1.antal ?? (ok(f.börsvärde, pris) && pris > 0 ? f.börsvärde / pris : null);
   const netto = (y1.kassa ?? 0) - (y1.lan ?? 0);
-  if (!sammaValuta) varde = { saknas: `Bolaget redovisar i ${serier.valuta} men aktien handlas i ${f.valuta}. Värdet per aktie kan därför inte räknas här.` };
+  const finans = FINANS.test(f.sektor || "");
+  if (finans) varde = { saknas: "Kassaflödesvärdering fungerar inte för banker, försäkringsbolag och fastighetsbolag. Deras kassaflöden styrs av in- och utlåning, inte av vinsten." };
+  else if (!sammaValuta) varde = { saknas: `Bolaget redovisar i ${serier.valuta} men aktien handlas i ${f.valuta}. Värdet per aktie kan därför inte räknas här.` };
   else if (!ok(agar, antal)) varde = { saknas: "Kassaflödet saknas i rapportdatan." };
   else if (agar <= 0) varde = { saknas: "Bolaget gör av med mer pengar än det tjänar (negativt kassaflöde efter aktielöner). Då går värdet inte att räkna från dagens kassaflöde – det hänger helt på framtida vinster." };
   else {
@@ -257,7 +260,7 @@ export function djupanalys(serier, f, pris, ranta, t = "") {
   if (F) (F.nivå === "stark" ? plus : F.nivå === "svag" ? minus : []).push(`Finansiell styrka ${F.poäng} av ${F.av}`);
   if (Z) (Z.nivå === "trygg" ? plus : Z.nivå === "risk" ? minus : []).push(Z.nivå === "trygg" ? "Låg risk för obestånd" : "Förhöjd risk för obestånd");
   if (M && M.flagga) minus.push("Bokföringen har varningstecken");
-  if (kvalitet && kvalitet.kassa_per_vinstkrona != null) (kvalitet.kassa_per_vinstkrona >= 1 ? plus : kvalitet.kassa_per_vinstkrona < 0.6 ? minus : []).push(kvalitet.kassa_per_vinstkrona >= 1 ? "Vinsten blir riktiga pengar" : "Vinsten blir inte pengar i kassan");
+  if (!finans && kvalitet && kvalitet.kassa_per_vinstkrona != null) (kvalitet.kassa_per_vinstkrona >= 1 ? plus : kvalitet.kassa_per_vinstkrona < 0.6 ? minus : []).push(kvalitet.kassa_per_vinstkrona >= 1 ? "Vinsten blir riktiga pengar" : "Vinsten blir inte pengar i kassan");
   const halsa = minus.length >= 2 || (Z && Z.nivå === "risk") ? "Svag" : plus.length >= 2 && !minus.length ? "Stark" : "Okej";
 
   return {
@@ -266,7 +269,7 @@ export function djupanalys(serier, f, pris, ranta, t = "") {
     dupont: ar.slice(-4).map(dupont).filter(Boolean),
     styrka: F, obestånd: Z, bokföring: M, kvalitet, aktier, värde: varde,
     hälsa: { betyg: halsa, plus, minus },
-    finans: FINANS.test(f.sektor || ""),
-    saknar: Object.keys(FALT).filter((k) => y1[k] == null).concat(ok(f.börsvärde) ? [] : ["börsvärde"]),
+    finans,
+    saknar: Object.keys(FALT).filter((k) => k !== "cfo2" && y1[k] == null).concat(ok(f.börsvärde) ? [] : ["börsvärde"]),
   };
 }
