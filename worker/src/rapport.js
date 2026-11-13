@@ -207,6 +207,8 @@ export function djupanalys(serier, f, pris, ranta, t = "") {
   f = f || {};
   const ar = serier.år, kv = serier.kv, y1 = ar.at(-1), y0 = ar.at(-2);
   if (!y1) return { saknas: true };
+  // Totala skulder saknas ibland hos Yahoo: då är de tillgångar minus eget kapital
+  for (const y of ar) if (y.skulder == null && ok(y.tillg, y.ek)) y.skulder = y.tillg - y.ek;
   const sammaValuta = !serier.valuta || !f.valuta || serier.valuta === f.valuta;
   const sum4 = (k) => { const q = kv.slice(-4); return q.length === 4 && q.every((x) => ok(x[k])) ? q.reduce((a, x) => a + x[k], 0) : null; };
   // Senaste 12 månaderna (fyra kvartal) om de finns, annars senaste året
